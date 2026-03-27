@@ -71,6 +71,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if (empty($errores)) {
     if ($accion === 'actualizar' && $ordenId > 0) {
+      $stmtPrev = $pdo->prepare('SELECT estado, eliminada, monto, monto_comprometido FROM ceo_ordenes WHERE id = ?');
+      $stmtPrev->execute([$ordenId]);
+      $prev = $stmtPrev->fetch();
+
       $stmt = $pdo->prepare(
         'UPDATE ceo_ordenes
          SET oc = ?, contrato = ?, fecha_entrega = ?, moneda_id = ?, pep = ?, sociedad = ?, proyecto_id = ?, monto = ?, monto_comprometido = ?, estado = ?,
@@ -95,6 +99,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ordenId
       ]);
       $mensaje = 'Orden actualizada correctamente.';
+
+      if ($prev) {
+        $prevTemp = ($prev['estado'] !== 'Pagado' && (int)$prev['eliminada'] === 0) ? (float)$prev['monto_comprometido'] : 0.0;
+        $prevDef = ($prev['estado'] === 'Pagado' && (int)$prev['eliminada'] === 0) ? (float)$prev['monto'] : 0.0;
+        $newTemp = ($estado !== 'Pagado' && $eliminada === 0) ? $montoComprometido : 0.0;
+        $newDef = ($estado === 'Pagado' && $eliminada === 0) ? $monto : 0.0;
+
+        $deltaTemp = $newTemp - $prevTemp;
+        $deltaDef = $newDef - $prevDef;
+        $fechaMov = date('Y-m-d');
+
+        if ($deltaTemp != 0.0) {
+          $tipo = $deltaTemp > 0 ? 'ajuste_temporal' : 'reversa_temporal';
+          $stmtMov = $pdo->prepare('INSERT INTO ceo_presupuesto_movimientos (orden_id, tipo, monto, fecha, estado) VALUES (?, ?, ?, ?, ?)');
+          $stmtMov->execute([$ordenId, $tipo, $deltaTemp, $fechaMov, $estado]);
+        }
+
+        if ($deltaDef != 0.0) {
+          $tipo = $deltaDef > 0 ? 'ajuste_definitivo' : 'reversa_definitivo';
+          $stmtMov = $pdo->prepare('INSERT INTO ceo_presupuesto_movimientos (orden_id, tipo, monto, fecha, estado) VALUES (?, ?, ?, ?, ?)');
+          $stmtMov->execute([$ordenId, $tipo, $deltaDef, $fechaMov, $estado]);
+        }
+      }
     } else {
       $stmt = $pdo->prepare(
         'INSERT INTO ceo_ordenes (oc, contrato, fecha_entrega, moneda_id, pep, sociedad, proyecto_id, monto, monto_comprometido, estado, estado_detalle, estado_detalle_otro, hes, eliminada)
@@ -191,6 +218,22 @@ $ordenes = $pdo->query(
    ORDER BY o.id DESC
    LIMIT 50"
 )->fetchAll();
+
+$movimientosPorOrden = [];
+if (!empty($ordenes)) {
+  $ids = array_map(static fn($o) => (int)$o['id'], $ordenes);
+  $placeholders = implode(',', array_fill(0, count($ids), '?'));
+  $stmtMov = $pdo->prepare(
+    "SELECT orden_id, tipo, monto, fecha, estado, creado_en
+     FROM ceo_presupuesto_movimientos
+     WHERE orden_id IN ({$placeholders})
+     ORDER BY creado_en DESC"
+  );
+  $stmtMov->execute($ids);
+  foreach ($stmtMov->fetchAll() as $mov) {
+    $movimientosPorOrden[(int)$mov['orden_id']][] = $mov;
+  }
+}
 ?>
 
 <div class="card p-4 mb-4">
@@ -332,6 +375,7 @@ $ordenes = $pdo->query(
           <th>Adjuntos</th>
           <th>Eliminada</th>
           <th>Acciones</th>
+          <th>Historial</th>
         </tr>
       </thead>
       <tbody>
@@ -388,6 +432,47 @@ $ordenes = $pdo->query(
                         data-eliminada="<?= (int)$o['eliminada'] ?>">
                   Editar
                 </button>
+              </td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#historial-<?= (int)$o['id'] ?>" aria-expanded="false" aria-controls="historial-<?= (int)$o['id'] ?>">
+                  Ver
+                </button>
+              </td>
+            </tr>
+            <tr class="collapse" id="historial-<?= (int)$o['id'] ?>">
+              <td colspan="12">
+                <div class="p-3 bg-light rounded">
+                  <div class="fw-semibold mb-2">Historial de movimientos</div>
+                  <?php $movs = $movimientosPorOrden[(int)$o['id']] ?? []; ?>
+                  <?php if (empty($movs)): ?>
+                    <div class="text-secondary">Sin movimientos registrados.</div>
+                  <?php else: ?>
+                    <div class="table-responsive">
+                      <table class="table table-sm mb-0">
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th class="text-end">Monto</th>
+                            <th>Estado</th>
+                            <th>Creado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <?php foreach ($movs as $mov): ?>
+                            <tr>
+                              <td><?= htmlspecialchars($mov['fecha']) ?></td>
+                              <td><?= htmlspecialchars($mov['tipo']) ?></td>
+                              <td class="text-end"><?= number_format((float)$mov['monto'], 0, ',', '.') ?></td>
+                              <td><?= htmlspecialchars($mov['estado']) ?></td>
+                              <td><?= htmlspecialchars($mov['creado_en']) ?></td>
+                            </tr>
+                          <?php endforeach; ?>
+                        </tbody>
+                      </table>
+                    </div>
+                  <?php endif; ?>
+                </div>
               </td>
             </tr>
           <?php endforeach; ?>

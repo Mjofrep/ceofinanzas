@@ -35,6 +35,12 @@ function normalizarNombreArchivo(string $name): string
   return trim($name, '_');
 }
 
+function formatearMonto(float $monto, string $moneda): string
+{
+  $decimales = $moneda === 'CLP' ? 0 : 2;
+  return number_format($monto, $decimales, ',', '.');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $accion = $_POST['accion'] ?? 'crear';
   $ordenId = (int)($_POST['orden_id'] ?? 0);
@@ -390,8 +396,8 @@ if (!empty($ordenes)) {
               <td><?= htmlspecialchars(trim($o['codigo'] . ' ' . $o['nombre'])) ?></td>
               <td><?= htmlspecialchars($o['fecha_entrega'] ?? '-') ?></td>
               <td><?= htmlspecialchars($o['moneda']) ?></td>
-              <td class="text-end"><?= number_format((float)$o['monto'], 0, ',', '.') ?></td>
-              <td class="text-end"><?= number_format((float)$o['monto_comprometido'], 0, ',', '.') ?></td>
+              <td class="text-end"><?= formatearMonto((float)$o['monto'], (string)$o['moneda']) ?></td>
+              <td class="text-end"><?= formatearMonto((float)$o['monto_comprometido'], (string)$o['moneda']) ?></td>
               <td><?= htmlspecialchars($o['estado']) ?></td>
               <td><?= htmlspecialchars($o['estado_detalle'] === 'Otro' ? ($o['estado_detalle_otro'] ?? 'Otro') : ($o['estado_detalle'] ?? '-')) ?></td>
               <td><?= htmlspecialchars($o['hes'] ?? '-') ?></td>
@@ -463,7 +469,7 @@ if (!empty($ordenes)) {
                             <tr>
                               <td><?= htmlspecialchars($mov['fecha']) ?></td>
                               <td><?= htmlspecialchars($mov['tipo']) ?></td>
-                              <td class="text-end"><?= number_format((float)$mov['monto'], 0, ',', '.') ?></td>
+                              <td class="text-end"><?= number_format((float)$mov['monto'], 2, ',', '.') ?></td>
                               <td><?= htmlspecialchars($mov['estado']) ?></td>
                               <td><?= htmlspecialchars($mov['creado_en']) ?></td>
                             </tr>

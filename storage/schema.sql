@@ -99,6 +99,14 @@ CREATE TABLE IF NOT EXISTS ceo_presupuesto_movimientos (
   CONSTRAINT fk_ceo_movimientos_orden FOREIGN KEY (orden_id) REFERENCES ceo_ordenes(id)
 );
 
+CREATE TABLE IF NOT EXISTS ceo_tipo_cambio (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  fecha DATE NOT NULL,
+  moneda VARCHAR(10) NOT NULL,
+  valor_clp DECIMAL(18,6) NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_ceo_tipo_cambio (fecha, moneda)
+);
+
 CREATE TABLE IF NOT EXISTS ceo_facturas (
   id INT AUTO_INCREMENT PRIMARY KEY,
   proveedor_id INT NOT NULL,

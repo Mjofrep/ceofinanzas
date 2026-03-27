@@ -21,6 +21,7 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
           <ul class="dropdown-menu" aria-labelledby="presupuestoMenu">
             <li><a class="dropdown-item <?= $currentPage === 'import_presupuesto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/import_presupuesto.php">Importar Excel</a></li>
             <li><a class="dropdown-item <?= $currentPage === 'presupuesto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/presupuesto.php">Ver Presupuesto</a></li>
+            <li><a class="dropdown-item <?= $currentPage === 'seguimiento_proyecto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_proyecto.php">Seguimiento Proyecto</a></li>
           </ul>
         </li>
 

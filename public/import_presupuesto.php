@@ -202,10 +202,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $headerRow = $rows[1];
       $mapa = obtenerMapaEncabezados($headerRow);
 
+      $esTipoCambio = strtolower($tipoHoja) === 'tipo_cambio';
       $esCapex = strtolower($tipoHoja) === 'capex';
-      $esperados = $esCapex
-        ? ['area','proyecto','clase coste','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
-        : ['area','ceco','descripcion de actividad','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      $esperados = $esTipoCambio
+        ? ['moneda','fecha','tipo cambio']
+        : ($esCapex
+          ? ['area','proyecto','clase coste','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+          : ['area','ceco','descripcion de actividad','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']);
 
       foreach ($esperados as $col) {
         if (!array_key_exists($col, $mapa)) {
@@ -220,70 +223,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo = db();
         $pdo->beginTransaction();
 
-        $cacheAreas = [];
-        $cacheClases = [];
-        $cacheProyectos = [];
-        $monedaId = getMonedaId($pdo, 'CLP');
-
-        $insert = $pdo->prepare(
-          'INSERT INTO ceo_presupuesto_mensual (area_id, proyecto_id, ceco, clase_costo_id, anio, mes, monto, moneda_id, origen_hoja)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE monto = VALUES(monto)'
-        );
-
-        $meses = [
-          'enero' => 1, 'febrero' => 2, 'marzo' => 3, 'abril' => 4,
-          'mayo' => 5, 'junio' => 6, 'julio' => 7, 'agosto' => 8,
-          'septiembre' => 9, 'octubre' => 10, 'noviembre' => 11, 'diciembre' => 12
-        ];
-
         $totalInsertados = 0;
 
-        foreach ($dataRows as $row) {
-          $area = trim((string)($row[$mapa['area']] ?? ''));
-          if ($area === '') {
-            continue;
-          }
-
-          if ($esCapex) {
-            $proyecto = trim((string)($row[$mapa['proyecto']] ?? ''));
-            $subclase = trim((string)($row[$mapa['clase coste']] ?? ''));
-            $codigo = $proyecto !== '' ? mb_substr($proyecto, 0, 50) : 'CAPEX';
-            $nombreProyecto = $proyecto !== '' ? $proyecto : 'SIN PROYECTO';
-            $ceco = null;
-            $tipoClase = 'CAPEX';
-          } else {
-            $descripcion = trim((string)($row[$mapa['descripcion de actividad']] ?? ''));
-            [$codigo, $nombreProyecto] = dividirCodigoNombre($descripcion);
-            $ceco = trim((string)($row[$mapa['ceco']] ?? ''));
-            $subclase = 'General';
-            $tipoClase = 'OPEX';
-          }
-
-          $areaId = getAreaId($pdo, $area, $cacheAreas);
-          $claseId = getClaseCostoId($pdo, $tipoClase, $subclase !== '' ? $subclase : 'General', $cacheClases);
-          $proyectoId = getProyectoId($pdo, $areaId, $codigo, $nombreProyecto !== '' ? $nombreProyecto : $codigo, $cacheProyectos);
-
-          foreach ($meses as $nombreMes => $numeroMes) {
-            $monto = limpiarMonto((string)($row[$mapa[$nombreMes]] ?? ''));
-            $insert->execute([
-              $areaId,
-              $proyectoId,
-              $ceco !== '' ? $ceco : null,
-              $claseId,
-              $anio,
-              $numeroMes,
-              $monto,
-              $monedaId,
-              $tipoHoja
-            ]);
+        if ($esTipoCambio) {
+          $stmtTc = $pdo->prepare('INSERT INTO ceo_tipo_cambio (fecha, moneda, valor_clp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor_clp = VALUES(valor_clp)');
+          foreach ($dataRows as $row) {
+            $moneda = strtoupper(trim((string)($row[$mapa['moneda']] ?? '')));
+            $fecha = trim((string)($row[$mapa['fecha']] ?? ''));
+            $valor = limpiarMonto((string)($row[$mapa['tipo cambio']] ?? ''));
+            if ($moneda === '' || $fecha === '' || $valor <= 0) {
+              continue;
+            }
+            $stmtTc->execute([$fecha, $moneda, $valor]);
             $totalInsertados++;
+          }
+        } else {
+          $cacheAreas = [];
+          $cacheClases = [];
+          $cacheProyectos = [];
+          $monedaId = getMonedaId($pdo, 'CLP');
+
+          $insert = $pdo->prepare(
+            'INSERT INTO ceo_presupuesto_mensual (area_id, proyecto_id, ceco, clase_costo_id, anio, mes, monto, moneda_id, origen_hoja)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE monto = VALUES(monto)'
+          );
+
+          $meses = [
+            'enero' => 1, 'febrero' => 2, 'marzo' => 3, 'abril' => 4,
+            'mayo' => 5, 'junio' => 6, 'julio' => 7, 'agosto' => 8,
+            'septiembre' => 9, 'octubre' => 10, 'noviembre' => 11, 'diciembre' => 12
+          ];
+
+          foreach ($dataRows as $row) {
+            $area = trim((string)($row[$mapa['area']] ?? ''));
+            if ($area === '') {
+              continue;
+            }
+
+            if ($esCapex) {
+              $proyecto = trim((string)($row[$mapa['proyecto']] ?? ''));
+              $subclase = trim((string)($row[$mapa['clase coste']] ?? ''));
+              $codigo = $proyecto !== '' ? mb_substr($proyecto, 0, 50) : 'CAPEX';
+              $nombreProyecto = $proyecto !== '' ? $proyecto : 'SIN PROYECTO';
+              $ceco = null;
+              $tipoClase = 'CAPEX';
+            } else {
+              $descripcion = trim((string)($row[$mapa['descripcion de actividad']] ?? ''));
+              [$codigo, $nombreProyecto] = dividirCodigoNombre($descripcion);
+              $ceco = trim((string)($row[$mapa['ceco']] ?? ''));
+              $subclase = 'General';
+              $tipoClase = 'OPEX';
+            }
+
+            $areaId = getAreaId($pdo, $area, $cacheAreas);
+            $claseId = getClaseCostoId($pdo, $tipoClase, $subclase !== '' ? $subclase : 'General', $cacheClases);
+            $proyectoId = getProyectoId($pdo, $areaId, $codigo, $nombreProyecto !== '' ? $nombreProyecto : $codigo, $cacheProyectos);
+
+            foreach ($meses as $nombreMes => $numeroMes) {
+              $monto = limpiarMonto((string)($row[$mapa[$nombreMes]] ?? ''));
+              $insert->execute([
+                $areaId,
+                $proyectoId,
+                $ceco !== '' ? $ceco : null,
+                $claseId,
+                $anio,
+                $numeroMes,
+                $monto,
+                $monedaId,
+                $tipoHoja
+              ]);
+              $totalInsertados++;
+            }
           }
         }
 
         $pdo->commit();
         $guardado = true;
-        $mensaje = 'Presupuesto importado correctamente. Registros procesados: ' . $totalInsertados;
+        $mensaje = $esTipoCambio
+          ? 'Tipo de cambio importado correctamente. Registros procesados: ' . $totalInsertados
+          : 'Presupuesto importado correctamente. Registros procesados: ' . $totalInsertados;
       } else {
         $preview = array_slice($dataRows, 0, 15);
       }
@@ -332,6 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <option value="Resumen" <?= $tipoHoja === 'Resumen' ? 'selected' : '' ?>>Resumen</option>
           <option value="Opex" <?= $tipoHoja === 'Opex' ? 'selected' : '' ?>>Opex</option>
           <option value="Capex" <?= $tipoHoja === 'Capex' ? 'selected' : '' ?>>Capex</option>
+          <option value="Tipo_Cambio" <?= $tipoHoja === 'Tipo_Cambio' ? 'selected' : '' ?>>Tipo de Cambio</option>
         </select>
       </div>
       <div class="col-md-4">
@@ -340,7 +360,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
       <div class="col-12">
         <p class="form-hint mb-0">
-          El sistema ignorara la primera fila de totales y validara encabezados antes de cargar.
+          Presupuesto: ignora la primera fila de totales y valida encabezados. Tipo de cambio: columnas Moneda, Fecha, Tipo Cambio.
         </p>
       </div>
       <div class="col-12 text-end">

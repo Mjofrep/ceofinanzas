@@ -11,7 +11,7 @@ $fechaTc = $_GET['fecha_tc'] ?? date('Y-m-d');
 $mensaje = '';
 $errores = [];
 
-$proyectos = $pdo->query('SELECT id, codigo, nombre FROM ceo_proyectos ORDER BY nombre')->fetchAll();
+$proyectos = $pdo->query('SELECT id, codigo, nombre FROM ceo_proyectos ORDER BY codigo')->fetchAll();
 
 $presupuestoTotal = 0.0;
 $comprometidoClp = 0.0;

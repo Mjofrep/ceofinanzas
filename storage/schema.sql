@@ -63,11 +63,40 @@ CREATE TABLE IF NOT EXISTS ceo_ordenes (
   sociedad VARCHAR(20) NOT NULL DEFAULT 'CL13',
   proyecto_id INT NOT NULL,
   monto DECIMAL(18,2) NOT NULL DEFAULT 0,
+  monto_comprometido DECIMAL(18,2) NOT NULL DEFAULT 0,
   estado VARCHAR(20) NOT NULL DEFAULT 'Registrado',
+  estado_detalle VARCHAR(50) DEFAULT NULL,
+  estado_detalle_otro VARCHAR(120) DEFAULT NULL,
+  hes VARCHAR(50) DEFAULT NULL,
+  eliminada TINYINT(1) NOT NULL DEFAULT 0,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY idx_ceo_ordenes_proyecto (proyecto_id),
   CONSTRAINT fk_ceo_ordenes_moneda FOREIGN KEY (moneda_id) REFERENCES ceo_monedas(id),
   CONSTRAINT fk_ceo_ordenes_proyecto FOREIGN KEY (proyecto_id) REFERENCES ceo_proyectos(id)
+);
+
+CREATE TABLE IF NOT EXISTS ceo_ordenes_adjuntos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  orden_id INT NOT NULL,
+  nombre_original VARCHAR(255) NOT NULL,
+  ruta VARCHAR(255) NOT NULL,
+  tipo_mime VARCHAR(100) NOT NULL,
+  tamano INT NOT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_ceo_adjuntos_orden (orden_id),
+  CONSTRAINT fk_ceo_adjuntos_orden FOREIGN KEY (orden_id) REFERENCES ceo_ordenes(id)
+);
+
+CREATE TABLE IF NOT EXISTS ceo_presupuesto_movimientos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  orden_id INT NOT NULL,
+  tipo VARCHAR(20) NOT NULL,
+  monto DECIMAL(18,2) NOT NULL DEFAULT 0,
+  fecha DATE NOT NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'Registrado',
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_ceo_movimientos_orden (orden_id),
+  CONSTRAINT fk_ceo_movimientos_orden FOREIGN KEY (orden_id) REFERENCES ceo_ordenes(id)
 );
 
 CREATE TABLE IF NOT EXISTS ceo_facturas (

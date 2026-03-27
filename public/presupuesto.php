@@ -39,13 +39,22 @@ $sql = "
          p.nombre AS proyecto,
          pm.ceco,
          cc.tipo AS clase,
-         SUM(pm.monto) AS total
+         SUM(pm.monto) AS total,
+         COALESCE(o.comprometido, 0) AS comprometido,
+         COALESCE(o.ejecutado, 0) AS ejecutado
   FROM ceo_presupuesto_mensual pm
   INNER JOIN ceo_areas a ON a.id = pm.area_id
   INNER JOIN ceo_proyectos p ON p.id = pm.proyecto_id
   INNER JOIN ceo_clase_costo cc ON cc.id = pm.clase_costo_id
+  LEFT JOIN (
+    SELECT proyecto_id,
+           SUM(CASE WHEN estado <> 'Pagado' AND eliminada = 0 THEN monto_comprometido ELSE 0 END) AS comprometido,
+           SUM(CASE WHEN estado = 'Pagado' AND eliminada = 0 THEN monto ELSE 0 END) AS ejecutado
+    FROM ceo_ordenes
+    GROUP BY proyecto_id
+  ) o ON o.proyecto_id = pm.proyecto_id
   WHERE {$where}
-  GROUP BY a.nombre, p.codigo, p.nombre, pm.ceco, cc.tipo
+  GROUP BY a.nombre, p.codigo, p.nombre, pm.ceco, cc.tipo, o.comprometido, o.ejecutado
   ORDER BY a.nombre, p.nombre
 ";
 
@@ -113,21 +122,33 @@ $rows = $stmt->fetchAll();
           <th>CECO</th>
           <th>Clase</th>
           <th class="text-end">Total</th>
+          <th class="text-end">Comprometido</th>
+          <th class="text-end">Ejecutado</th>
+          <th class="text-end">Disponible</th>
         </tr>
       </thead>
       <tbody>
         <?php if (empty($rows)): ?>
           <tr>
-            <td colspan="5" class="text-center text-secondary">Sin registros.</td>
+            <td colspan="8" class="text-center text-secondary">Sin registros.</td>
           </tr>
         <?php else: ?>
           <?php foreach ($rows as $r): ?>
+            <?php
+              $total = (float)$r['total'];
+              $comprometido = (float)$r['comprometido'];
+              $ejecutado = (float)$r['ejecutado'];
+              $disponible = $total - $comprometido - $ejecutado;
+            ?>
             <tr>
               <td><?= htmlspecialchars($r['area']) ?></td>
               <td><?= htmlspecialchars(trim($r['codigo'] . ' ' . $r['proyecto'])) ?></td>
               <td><?= htmlspecialchars($r['ceco'] ?? '-') ?></td>
               <td><?= htmlspecialchars($r['clase']) ?></td>
-              <td class="text-end"><?= number_format((float)$r['total'], 0, ',', '.') ?></td>
+              <td class="text-end"><?= number_format($total, 0, ',', '.') ?></td>
+              <td class="text-end"><?= number_format($comprometido, 0, ',', '.') ?></td>
+              <td class="text-end"><?= number_format($ejecutado, 0, ',', '.') ?></td>
+              <td class="text-end"><?= number_format($disponible, 0, ',', '.') ?></td>
             </tr>
           <?php endforeach; ?>
         <?php endif; ?>

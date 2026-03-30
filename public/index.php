@@ -86,7 +86,7 @@ foreach ($rows as $r) {
         <div class="text-secondary">Sin proyectos CEO con datos para el ano seleccionado.</div>
       <?php else: ?>
         <div class="table-responsive">
-          <canvas id="presupuestoChart" height="180"></canvas>
+          <canvas id="presupuestoChart" height="122"></canvas>
         </div>
       <?php endif; ?>
     </div>

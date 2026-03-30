@@ -71,10 +71,13 @@ foreach ($rows as $r) {
           <h2 class="h5 mb-2">Panel principal</h2>
           <p class="text-secondary mb-0">Resumen por proyecto con presupuesto, comprometido y pagado.</p>
         </div>
-        <form class="d-flex gap-2" method="get">
-          <input type="number" class="form-control form-control-sm" name="anio" value="<?= htmlspecialchars((string)$anio) ?>" min="2024" max="2100">
-          <button class="btn btn-sm btn-outline-primary" type="submit">Actualizar</button>
-        </form>
+        <div class="d-flex gap-2 flex-wrap">
+          <form class="d-flex gap-2" method="get">
+            <input type="number" class="form-control form-control-sm" name="anio" value="<?= htmlspecialchars((string)$anio) ?>" min="2024" max="2100">
+            <button class="btn btn-sm btn-outline-primary" type="submit">Actualizar</button>
+          </form>
+          <a class="btn btn-sm btn-outline-secondary" href="https://www.noetica.cl/ceo.noetica.cl/public/general.php">Volver al CEO</a>
+        </div>
       </div>
     </div>
   </div>

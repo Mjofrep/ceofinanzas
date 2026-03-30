@@ -25,7 +25,7 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
         </li>
 
         <li class="nav-item">
-          <a class="nav-link <?= $currentPage === 'ejecucion.php' ? 'active' : '' ?>" href="/ceofinanzas/public/ejecucion.php">Ejecucion Real</a>
+          <a class="nav-link <?= $currentPage === 'ejecucion.php' ? 'active' : '' ?>" href="/ceofinanzas/public/ejecucion.php">Ordenes de Pedido</a>
         </li>
         <li class="nav-item">
           <a class="nav-link <?= $currentPage === 'pagos.php' ? 'active' : '' ?>" href="/ceofinanzas/public/pagos.php">Pagos y Facturas</a>
@@ -37,6 +37,7 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
           </a>
           <ul class="dropdown-menu" aria-labelledby="seguimientoMenu">
             <li><a class="dropdown-item <?= $currentPage === 'seguimiento_proyecto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_proyecto.php">Proyectos</a></li>
+            <li><a class="dropdown-item <?= $currentPage === 'seguimiento_ordenes.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_ordenes.php">Ordenes de Pedido</a></li>
           </ul>
         </li>
       </ul>

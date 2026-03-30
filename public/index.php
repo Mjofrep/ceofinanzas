@@ -23,8 +23,10 @@ $stmt = $pdo->prepare(
             SUM(CASE
                   WHEN o.estado <> 'Pagado' AND o.eliminada = 0 THEN
                     CASE
-                      WHEN m.codigo = 'CLP' THEN o.monto_comprometido
-                      WHEN tc.valor_clp IS NOT NULL THEN o.monto_comprometido * tc.valor_clp
+                      WHEN m.codigo = 'CLP' THEN
+                        (CASE WHEN o.monto_comprometido > 0 THEN o.monto_comprometido ELSE o.monto END)
+                      WHEN tc.valor_clp IS NOT NULL THEN
+                        (CASE WHEN o.monto_comprometido > 0 THEN o.monto_comprometido ELSE o.monto END) * tc.valor_clp
                       ELSE 0
                     END
                   ELSE 0

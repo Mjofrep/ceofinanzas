@@ -8,7 +8,7 @@ $mensaje = '';
 $errores = [];
 
 $monedas = $pdo->query('SELECT id, codigo FROM ceo_monedas ORDER BY codigo')->fetchAll();
-$proyectos = $pdo->query('SELECT id, codigo, nombre FROM ceo_proyectos ORDER BY nombre')->fetchAll();
+$proyectos = $pdo->query('SELECT id, codigo, nombre FROM ceo_proyectos ORDER BY codigo')->fetchAll();
 $estados_detalle = [
   'Ingresado',
   'Pendiente de firmas',

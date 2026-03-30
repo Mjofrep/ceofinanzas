@@ -11,9 +11,11 @@ $archivoGuardado = '';
 $tipoHoja = '';
 $anio = 2026;
 $guardado = false;
+$archivoOriginal = '';
 
 function normalizarEncabezado(string $value): string
 {
+  $value = str_replace("\xEF\xBB\xBF", '', $value);
   $value = trim($value);
   $value = preg_replace('/\s+/', ' ', $value);
   $replacements = [
@@ -25,14 +27,70 @@ function normalizarEncabezado(string $value): string
   return strtolower($value);
 }
 
+function detectarFilaEncabezado(array $rows, array $esperados, int $maxFilas = 5): array
+{
+  $max = min($maxFilas, count($rows));
+  for ($i = 0; $i < $max; $i++) {
+    $mapa = obtenerMapaEncabezados($rows[$i]);
+    $ok = true;
+    foreach ($esperados as $col) {
+      if (!array_key_exists($col, $mapa)) {
+        $ok = false;
+        break;
+      }
+    }
+    if ($ok) {
+      return [$i, $rows[$i], $mapa];
+    }
+  }
+  return [-1, [], []];
+}
+
+function parseMonedaAnioDesdeNombre(string $nombre): array
+{
+  $nombre = str_replace("\xEF\xBB\xBF", '', $nombre);
+  $nombre = strtolower(trim($nombre));
+  $nombre = strtr($nombre, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n']);
+
+  $moneda = '';
+  if (preg_match('/\buf\b/', $nombre)) {
+    $moneda = 'UF';
+  } elseif (preg_match('/\bdolar\b|\busd\b|\bus\$/', $nombre)) {
+    $moneda = 'USD';
+  } elseif (preg_match('/\beuro\b|\beur\b/', $nombre)) {
+    $moneda = 'EUR';
+  } elseif (preg_match('/\bclp\b|\bpesos?\b/', $nombre)) {
+    $moneda = 'CLP';
+  }
+
+  $anio = 0;
+  if (preg_match('/(20\d{2})/', $nombre, $m)) {
+    $anio = (int)$m[1];
+  }
+
+  return [$moneda, $anio];
+}
+
 function limpiarMonto(string $value): float
 {
   $value = trim($value);
   if ($value === '' || $value === '-') {
     return 0.0;
   }
-  $value = str_replace(['.', ' '], '', $value);
-  $value = str_replace(',', '.', $value);
+  $value = str_replace(' ', '', $value);
+  $hasComma = strpos($value, ',') !== false;
+  $hasDot = strpos($value, '.') !== false;
+
+  if ($hasComma) {
+    $value = str_replace('.', '', $value);
+    $value = str_replace(',', '.', $value);
+  } elseif ($hasDot) {
+    $lastDot = strrpos($value, '.');
+    $decimals = strlen($value) - $lastDot - 1;
+    if ($decimals === 3 || $decimals > 3) {
+      $value = str_replace('.', '', $value);
+    }
+  }
   if (!is_numeric($value)) {
     return 0.0;
   }
@@ -63,15 +121,15 @@ function cargarDatosCsv(string $ruta): array
   return $rows;
 }
 
-function cargarDatosExcel(string $ruta, string $sheetName): array
+function cargarDatosExcel(string $ruta, ?string $sheetName): array
 {
   if (!class_exists('PhpOffice\PhpSpreadsheet\IOFactory')) {
     throw new RuntimeException('PhpSpreadsheet no esta instalado.');
   }
   $spreadsheet = PhpOffice\PhpSpreadsheet\IOFactory::load($ruta);
-  $sheet = $spreadsheet->getSheetByName($sheetName);
+  $sheet = $sheetName ? $spreadsheet->getSheetByName($sheetName) : $spreadsheet->getActiveSheet();
   if ($sheet === null) {
-    throw new RuntimeException('No se encontro la hoja ' . $sheetName);
+    throw new RuntimeException('No se encontro la hoja solicitada.');
   }
   return $sheet->toArray(null, false, false, false);
 }
@@ -164,22 +222,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   if ($accion === 'guardar') {
     $archivoGuardado = $_POST['archivo_guardado'] ?? '';
+    $archivoOriginal = $_POST['archivo_original'] ?? '';
     if ($archivoGuardado === '' || !is_file($archivoGuardado)) {
       $errores[] = 'No se encontro el archivo para importar.';
     }
   }
 
   if ($accion !== 'guardar') {
-    if (!empty($_FILES['archivo']['tmp_name'])) {
-      $uploadsDir = __DIR__ . '/../uploads';
-      if (!is_dir($uploadsDir)) {
-        mkdir($uploadsDir, 0775, true);
-      }
-      $ext = strtolower(pathinfo($_FILES['archivo']['name'], PATHINFO_EXTENSION));
-      $archivoGuardado = $uploadsDir . '/presupuesto_' . date('Ymd_His') . '.' . $ext;
-      if (!move_uploaded_file($_FILES['archivo']['tmp_name'], $archivoGuardado)) {
-        $errores[] = 'No se pudo guardar el archivo.';
-      }
+      if (!empty($_FILES['archivo']['tmp_name'])) {
+        $uploadsDir = __DIR__ . '/../uploads';
+        if (!is_dir($uploadsDir)) {
+          mkdir($uploadsDir, 0775, true);
+        }
+        $ext = strtolower(pathinfo($_FILES['archivo']['name'], PATHINFO_EXTENSION));
+        $archivoGuardado = $uploadsDir . '/presupuesto_' . date('Ymd_His') . '.' . $ext;
+        $archivoOriginal = $_FILES['archivo']['name'] ?? '';
+        if (!move_uploaded_file($_FILES['archivo']['tmp_name'], $archivoGuardado)) {
+          $errores[] = 'No se pudo guardar el archivo.';
+        }
     } else {
       $errores[] = 'Debe seleccionar un archivo.';
     }
@@ -188,9 +248,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (empty($errores)) {
     try {
       $ext = strtolower(pathinfo($archivoGuardado, PATHINFO_EXTENSION));
+      $sheetName = '';
       if (in_array($ext, ['xlsx', 'xls'], true)) {
         require_once __DIR__ . '/../vendor/autoload.php';
-        $rows = cargarDatosExcel($archivoGuardado, $tipoHoja);
+        if (strtolower($tipoHoja) === 'tipo_cambio') {
+          $spreadsheet = PhpOffice\PhpSpreadsheet\IOFactory::load($archivoGuardado);
+          $sheet = $spreadsheet->getActiveSheet();
+          $sheetName = $sheet->getTitle();
+          $rows = $sheet->toArray(null, false, false, false);
+        } else {
+          $rows = cargarDatosExcel($archivoGuardado, $tipoHoja);
+        }
       } else {
         $rows = cargarDatosCsv($archivoGuardado);
       }
@@ -200,23 +268,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       $esTipoCambio = strtolower($tipoHoja) === 'tipo_cambio';
-      $headerRow = $esTipoCambio ? $rows[0] : $rows[1];
-      $mapa = obtenerMapaEncabezados($headerRow);
       $esCapex = strtolower($tipoHoja) === 'capex';
       $esperados = $esTipoCambio
         ? ['moneda','fecha','tipo cambio']
         : ($esCapex
           ? ['area','proyecto','clase coste','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
           : ['area','ceco','descripcion de actividad','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']);
+      $esperadosCalendario = ['dia','ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
-      foreach ($esperados as $col) {
-        if (!array_key_exists($col, $mapa)) {
-          throw new RuntimeException('Encabezado faltante: ' . $col);
+      if ($esTipoCambio) {
+        [$headerIndex, $headerRow, $mapa] = detectarFilaEncabezado($rows, $esperados, 6);
+        $calIndex = -1;
+        $calHeader = [];
+        $calMap = [];
+        if ($headerIndex === -1) {
+          [$calIndex, $calHeader, $calMap] = detectarFilaEncabezado($rows, $esperadosCalendario, 6);
         }
-      }
 
-      $previewHeaders = $headerRow;
-      $dataRows = $esTipoCambio ? array_slice($rows, 1) : array_slice($rows, 2);
+        if ($headerIndex === -1 && $calIndex === -1) {
+          throw new RuntimeException('Encabezado faltante: moneda');
+        }
+
+        if ($calIndex !== -1) {
+          $previewHeaders = $calHeader;
+          $dataRows = array_slice($rows, $calIndex + 1);
+        } else {
+          $previewHeaders = $headerRow;
+          $dataRows = array_slice($rows, $headerIndex + 1);
+        }
+      } else {
+        $headerRow = $rows[1];
+        $mapa = obtenerMapaEncabezados($headerRow);
+        foreach ($esperados as $col) {
+          if (!array_key_exists($col, $mapa)) {
+            throw new RuntimeException('Encabezado faltante: ' . $col);
+          }
+        }
+        $previewHeaders = $headerRow;
+        $dataRows = array_slice($rows, 2);
+      }
 
       if ($accion === 'guardar') {
         $pdo = db();
@@ -226,15 +316,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($esTipoCambio) {
           $stmtTc = $pdo->prepare('INSERT INTO ceo_tipo_cambio (fecha, moneda, valor_clp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor_clp = VALUES(valor_clp)');
-          foreach ($dataRows as $row) {
-            $moneda = strtoupper(trim((string)($row[$mapa['moneda']] ?? '')));
-            $fecha = trim((string)($row[$mapa['fecha']] ?? ''));
-            $valor = limpiarMonto((string)($row[$mapa['tipo cambio']] ?? ''));
-            if ($moneda === '' || $fecha === '' || $valor <= 0) {
-              continue;
+
+          $usaCalendario = isset($calIndex) && $calIndex !== -1;
+          if ($usaCalendario) {
+            $nombreArchivo = $archivoOriginal !== ''
+              ? pathinfo($archivoOriginal, PATHINFO_FILENAME)
+              : pathinfo($archivoGuardado, PATHINFO_FILENAME);
+            $fuente = $sheetName !== '' ? $sheetName : $nombreArchivo;
+            [$moneda, $anio] = parseMonedaAnioDesdeNombre($fuente);
+            if ($moneda === '' || $anio === 0) {
+              throw new RuntimeException('No se pudo determinar moneda/anio desde el nombre de la hoja o archivo.');
             }
-            $stmtTc->execute([$fecha, $moneda, $valor]);
-            $totalInsertados++;
+
+            $meses = ['ene' => 1, 'feb' => 2, 'mar' => 3, 'abr' => 4, 'may' => 5, 'jun' => 6, 'jul' => 7, 'ago' => 8, 'sep' => 9, 'oct' => 10, 'nov' => 11, 'dic' => 12];
+
+            foreach ($dataRows as $row) {
+              $diaRaw = trim((string)($row[$calMap['dia']] ?? ''));
+              if ($diaRaw === '' || !ctype_digit($diaRaw)) {
+                continue;
+              }
+              $dia = (int)$diaRaw;
+              if ($dia < 1 || $dia > 31) {
+                continue;
+              }
+              foreach ($meses as $mesNombre => $mesNum) {
+                if (!isset($calMap[$mesNombre])) {
+                  continue;
+                }
+                $valor = limpiarMonto((string)($row[$calMap[$mesNombre]] ?? ''));
+                if ($valor <= 0) {
+                  continue;
+                }
+                $fecha = sprintf('%04d-%02d-%02d', $anio, $mesNum, $dia);
+                $stmtTc->execute([$fecha, $moneda, $valor]);
+                $totalInsertados++;
+              }
+            }
+          } else {
+            foreach ($dataRows as $row) {
+              $moneda = strtoupper(trim((string)($row[$mapa['moneda']] ?? '')));
+              $fecha = trim((string)($row[$mapa['fecha']] ?? ''));
+              $valor = limpiarMonto((string)($row[$mapa['tipo cambio']] ?? ''));
+              if ($moneda === '' || $fecha === '' || $valor <= 0) {
+                continue;
+              }
+              $stmtTc->execute([$fecha, $moneda, $valor]);
+              $totalInsertados++;
+            }
           }
         } else {
           $cacheAreas = [];
@@ -359,7 +487,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
       <div class="col-12">
         <p class="form-hint mb-0">
-          Presupuesto: ignora la primera fila de totales y valida encabezados. Tipo de cambio: columnas Moneda, Fecha, Tipo Cambio.
+          Presupuesto: ignora la primera fila de totales y valida encabezados. Tipo de cambio: columnas Moneda, Fecha, Tipo Cambio o formato calendario Dia/Ene...Dic.
         </p>
       </div>
       <div class="col-12 text-end">
@@ -395,6 +523,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <form method="post" class="text-end">
       <input type="hidden" name="accion" value="guardar">
       <input type="hidden" name="archivo_guardado" value="<?= htmlspecialchars($archivoGuardado) ?>">
+      <input type="hidden" name="archivo_original" value="<?= htmlspecialchars($archivoOriginal) ?>">
       <input type="hidden" name="tipo_hoja" value="<?= htmlspecialchars($tipoHoja) ?>">
       <input type="hidden" name="anio" value="<?= htmlspecialchars((string)$anio) ?>">
       <button type="submit" class="btn btn-success">Guardar Importacion</button>

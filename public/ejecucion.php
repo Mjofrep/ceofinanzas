@@ -56,8 +56,20 @@ function limpiarMontoInput(string $value): float
   if ($value === '') {
     return 0.0;
   }
-  $value = str_replace(['.', ' '], '', $value);
-  $value = str_replace(',', '.', $value);
+  $value = str_replace(' ', '', $value);
+  $hasComma = strpos($value, ',') !== false;
+  $hasDot = strpos($value, '.') !== false;
+
+  if ($hasComma) {
+    $value = str_replace('.', '', $value);
+    $value = str_replace(',', '.', $value);
+  } elseif ($hasDot) {
+    $lastDot = strrpos($value, '.');
+    $decimals = strlen($value) - $lastDot - 1;
+    if ($decimals === 3 || $decimals > 3) {
+      $value = str_replace('.', '', $value);
+    }
+  }
   return is_numeric($value) ? (float)$value : 0.0;
 }
 
@@ -71,6 +83,33 @@ function formatearMonto(float $monto, string $moneda): string
 {
   $decimales = $moneda === 'CLP' ? 0 : 2;
   return number_format($monto, $decimales, ',', '.');
+}
+
+function obtenerTipoCambioApi(string $moneda, string $fecha): ?float
+{
+  $mapa = [
+    'UF' => 'uf',
+    'USD' => 'dolar',
+    'EUR' => 'euro'
+  ];
+  if (!isset($mapa[$moneda])) {
+    return null;
+  }
+  $partes = explode('-', $fecha);
+  if (count($partes) !== 3) {
+    return null;
+  }
+  $fechaApi = $partes[2] . '-' . $partes[1] . '-' . $partes[0];
+  $url = 'https://mindicador.cl/api/' . $mapa[$moneda] . '/' . $fechaApi;
+  $json = @file_get_contents($url);
+  if ($json === false) {
+    return null;
+  }
+  $data = json_decode($json, true);
+  if (!is_array($data) || empty($data['serie'][0]['valor'])) {
+    return null;
+  }
+  return (float)$data['serie'][0]['valor'];
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -91,8 +130,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $hes = trim($_POST['hes'] ?? '');
   $eliminada = isset($_POST['eliminada']) ? 1 : 0;
 
+  $stmtMoneda = $pdo->prepare('SELECT codigo FROM ceo_monedas WHERE id = ?');
+  $stmtMoneda->execute([$monedaId]);
+  $codigoMoneda = (string)($stmtMoneda->fetchColumn() ?: '');
+
   if ($oc === '' || $monedaId <= 0 || $proyectoId <= 0) {
     $errores[] = 'OC, moneda y proyecto son obligatorios.';
+  }
+
+  if ($codigoMoneda !== 'CLP') {
+    if (empty($fechaEntrega)) {
+      $errores[] = 'Fecha entrega es obligatoria para monedas distintas de CLP.';
+    } else {
+      $partesFecha = explode('-', $fechaEntrega);
+      if (count($partesFecha) !== 3 || !checkdate((int)$partesFecha[1], (int)$partesFecha[2], (int)$partesFecha[0])) {
+        $errores[] = 'Fecha entrega no es valida.';
+      }
+      $stmtTc = $pdo->prepare('SELECT valor_clp FROM ceo_tipo_cambio WHERE fecha = ? AND moneda = ?');
+      $stmtTc->execute([$fechaEntrega, $codigoMoneda]);
+      $tcValor = $stmtTc->fetchColumn();
+      if ($tcValor === false) {
+        $tcApi = obtenerTipoCambioApi($codigoMoneda, $fechaEntrega);
+        if ($tcApi !== null && $tcApi > 0) {
+          $stmtIns = $pdo->prepare('INSERT INTO ceo_tipo_cambio (fecha, moneda, valor_clp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor_clp = VALUES(valor_clp)');
+          $stmtIns->execute([$fechaEntrega, $codigoMoneda, $tcApi]);
+        } else {
+          $errores[] = 'No existe tipo de cambio para ' . $codigoMoneda . ' en la fecha ' . $fechaEntrega . '.';
+        }
+      }
+    }
   }
 
   if ($estado === 'Pagado' && $hes === '') {

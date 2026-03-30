@@ -7,7 +7,6 @@ $pdo = db();
 
 $anio = (int)($_GET['anio'] ?? 2026);
 $proyectoId = (int)($_GET['proyecto_id'] ?? 0);
-$fechaTc = $_GET['fecha_tc'] ?? date('Y-m-d');
 $mensaje = '';
 $errores = [];
 
@@ -19,25 +18,6 @@ $ejecutadoClp = 0.0;
 $disponibleClp = 0.0;
 $resumenMonedas = [];
 $ordenes = [];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['accion'] ?? '') === 'guardar_tc') {
-  $fechaTc = $_POST['fecha_tc'] ?? date('Y-m-d');
-  $tcUf = (float)str_replace([',', ' '], ['.', ''], trim($_POST['tc_uf'] ?? '0'));
-  $tcUsd = (float)str_replace([',', ' '], ['.', ''], trim($_POST['tc_usd'] ?? '0'));
-  $tcEur = (float)str_replace([',', ' '], ['.', ''], trim($_POST['tc_eur'] ?? '0'));
-
-  if ($tcUf <= 0 || $tcUsd <= 0 || $tcEur <= 0) {
-    $errores[] = 'Debe ingresar tipo de cambio valido para UF, USD y EUR.';
-  }
-
-  if (empty($errores)) {
-    $stmt = $pdo->prepare('INSERT INTO ceo_tipo_cambio (fecha, moneda, valor_clp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor_clp = VALUES(valor_clp)');
-    $stmt->execute([$fechaTc, 'UF', $tcUf]);
-    $stmt->execute([$fechaTc, 'USD', $tcUsd]);
-    $stmt->execute([$fechaTc, 'EUR', $tcEur]);
-    $mensaje = 'Tipo de cambio guardado.';
-  }
-}
 
 if ($proyectoId > 0) {
   $stmt = $pdo->prepare('SELECT SUM(monto) AS total FROM ceo_presupuesto_mensual WHERE proyecto_id = ? AND anio = ?');
@@ -57,32 +37,38 @@ if ($proyectoId > 0) {
   $stmt->execute([$proyectoId]);
   $resumenMonedas = $stmt->fetchAll();
 
-  $stmt = $pdo->prepare('SELECT moneda, valor_clp FROM ceo_tipo_cambio WHERE fecha = ?');
-  $stmt->execute([$fechaTc]);
-  $tc = [];
-  foreach ($stmt->fetchAll() as $row) {
-    $tc[$row['moneda']] = (float)$row['valor_clp'];
-  }
-
-  foreach ($resumenMonedas as $row) {
-    $moneda = $row['moneda'];
-    $comp = (float)$row['comprometido'];
-    $eje = (float)$row['ejecutado'];
-    if ($moneda === 'CLP') {
-      $comprometidoClp += $comp;
-      $ejecutadoClp += $eje;
-    } elseif (isset($tc[$moneda]) && $tc[$moneda] > 0) {
-      $comprometidoClp += $comp * $tc[$moneda];
-      $ejecutadoClp += $eje * $tc[$moneda];
-    }
-  }
+  $stmt = $pdo->prepare(
+    "SELECT
+        SUM(CASE
+              WHEN m.codigo = 'CLP' THEN o.monto_comprometido
+              WHEN tc.valor_clp IS NOT NULL THEN o.monto_comprometido * tc.valor_clp
+              ELSE 0
+            END) AS comprometido_clp,
+        SUM(CASE
+              WHEN m.codigo = 'CLP' THEN o.monto
+              WHEN tc.valor_clp IS NOT NULL THEN o.monto * tc.valor_clp
+              ELSE 0
+            END) AS ejecutado_clp,
+        SUM(CASE WHEN m.codigo <> 'CLP' AND tc.valor_clp IS NULL THEN 1 ELSE 0 END) AS sin_tc
+     FROM ceo_ordenes o
+     INNER JOIN ceo_monedas m ON m.id = o.moneda_id
+     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_entrega AND tc.moneda = m.codigo
+     WHERE o.proyecto_id = ? AND o.eliminada = 0"
+  );
+  $stmt->execute([$proyectoId]);
+  $calc = $stmt->fetch() ?: [];
+  $comprometidoClp = (float)($calc['comprometido_clp'] ?? 0);
+  $ejecutadoClp = (float)($calc['ejecutado_clp'] ?? 0);
+  $sinTc = (int)($calc['sin_tc'] ?? 0);
 
   $disponibleClp = $presupuestoTotal - $comprometidoClp - $ejecutadoClp;
 
   $stmt = $pdo->prepare(
-    "SELECT o.oc, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.hes, m.codigo AS moneda
+    "SELECT o.oc, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.hes, m.codigo AS moneda,
+            tc.valor_clp AS tc_valor
      FROM ceo_ordenes o
      INNER JOIN ceo_monedas m ON m.id = o.moneda_id
+     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_entrega AND tc.moneda = m.codigo
      WHERE o.proyecto_id = ? AND o.eliminada = 0
      ORDER BY o.id DESC"
   );
@@ -121,52 +107,8 @@ function formatearMonto(float $monto, string $moneda): string
         <?php endforeach; ?>
       </select>
     </div>
-    <div class="col-md-3">
-      <label class="form-label">Fecha tipo de cambio</label>
-      <input type="date" class="form-control" name="fecha_tc" value="<?= htmlspecialchars($fechaTc) ?>">
-    </div>
     <div class="col-md-3 d-flex align-items-end">
       <button type="submit" class="btn btn-primary w-100">Ver</button>
-    </div>
-  </form>
-</div>
-
-<?php if (!empty($mensaje)): ?>
-  <div class="alert alert-success"><?= htmlspecialchars($mensaje) ?></div>
-<?php endif; ?>
-
-<?php if (!empty($errores)): ?>
-  <div class="alert alert-danger">
-    <ul class="mb-0">
-      <?php foreach ($errores as $err): ?>
-        <li><?= htmlspecialchars($err) ?></li>
-      <?php endforeach; ?>
-    </ul>
-  </div>
-<?php endif; ?>
-
-<div class="card p-4 mb-4">
-  <h3 class="h6 section-title mb-3">Registrar tipo de cambio (CLP)</h3>
-  <form class="row g-3" method="post">
-    <input type="hidden" name="accion" value="guardar_tc">
-    <div class="col-md-3">
-      <label class="form-label">Fecha</label>
-      <input type="date" class="form-control" name="fecha_tc" value="<?= htmlspecialchars($fechaTc) ?>" required>
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">UF</label>
-      <input type="text" class="form-control" name="tc_uf" placeholder="0">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">USD</label>
-      <input type="text" class="form-control" name="tc_usd" placeholder="0">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">EUR</label>
-      <input type="text" class="form-control" name="tc_eur" placeholder="0">
-    </div>
-    <div class="col-12 text-end">
-      <button type="submit" class="btn btn-outline-primary">Guardar tipo de cambio</button>
     </div>
   </form>
 </div>
@@ -225,7 +167,10 @@ function formatearMonto(float $monto, string $moneda): string
         </tbody>
       </table>
     </div>
-    <div class="form-hint">Conversión a CLP usa tipo de cambio de la fecha seleccionada.</div>
+    <div class="form-hint">Conversión a CLP usa el tipo de cambio de la fecha de entrega de cada orden.</div>
+    <?php if (!empty($sinTc) && $sinTc > 0): ?>
+      <div class="form-hint text-danger">Hay <?= (int)$sinTc ?> orden(es) sin tipo de cambio registrado en su fecha de entrega.</div>
+    <?php endif; ?>
   </div>
 
   <div class="card p-4">
@@ -242,6 +187,7 @@ function formatearMonto(float $monto, string $moneda): string
             <th>Estado</th>
             <th>Detalle</th>
             <th>HES</th>
+            <th class="text-end">TC (CLP)</th>
           </tr>
         </thead>
         <tbody>
@@ -258,6 +204,7 @@ function formatearMonto(float $monto, string $moneda): string
                 <td><?= htmlspecialchars($o['estado']) ?></td>
                 <td><?= htmlspecialchars($o['estado_detalle'] ?? '-') ?></td>
                 <td><?= htmlspecialchars($o['hes'] ?? '-') ?></td>
+                <td class="text-end"><?= $o['moneda'] === 'CLP' ? '-' : number_format((float)($o['tc_valor'] ?? 0), 2, ',', '.') ?></td>
               </tr>
             <?php endforeach; ?>
           <?php endif; ?>

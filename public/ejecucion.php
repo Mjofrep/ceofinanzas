@@ -18,6 +18,38 @@ $estados_detalle = [
   'Otro'
 ];
 
+$tcMensaje = '';
+try {
+  $fechaTc = date('Y-m-d');
+  $stmtTc = $pdo->prepare('SELECT COUNT(*) FROM ceo_tipo_cambio WHERE fecha = ? AND moneda IN ("UF", "USD", "EUR")');
+  $stmtTc->execute([$fechaTc]);
+  $tcCount = (int)$stmtTc->fetchColumn();
+
+  if ($tcCount < 3) {
+    $json = @file_get_contents('https://mindicador.cl/api');
+    if ($json === false) {
+      throw new RuntimeException('No se pudo consultar API de tipos de cambio.');
+    }
+    $data = json_decode($json, true);
+    if (!is_array($data) || empty($data['uf']['valor']) || empty($data['dolar']['valor']) || empty($data['euro']['valor'])) {
+      throw new RuntimeException('Respuesta invalida de API de tipos de cambio.');
+    }
+
+    $uf = (float)$data['uf']['valor'];
+    $usd = (float)$data['dolar']['valor'];
+    $eur = (float)$data['euro']['valor'];
+
+    $stmtIns = $pdo->prepare('INSERT INTO ceo_tipo_cambio (fecha, moneda, valor_clp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE valor_clp = VALUES(valor_clp)');
+    $stmtIns->execute([$fechaTc, 'UF', $uf]);
+    $stmtIns->execute([$fechaTc, 'USD', $usd]);
+    $stmtIns->execute([$fechaTc, 'EUR', $eur]);
+
+    $tcMensaje = 'Tipos de cambio del dia cargados automaticamente.';
+  }
+} catch (Throwable $e) {
+  $tcMensaje = 'No fue posible cargar tipos de cambio automaticamente.';
+}
+
 function limpiarMontoInput(string $value): float
 {
   $value = trim($value);
@@ -253,6 +285,10 @@ if (!empty($ordenes)) {
 
 <?php if (!empty($mensaje)): ?>
   <div class="alert alert-success"><?= htmlspecialchars($mensaje) ?></div>
+<?php endif; ?>
+
+<?php if (!empty($tcMensaje)): ?>
+  <div class="alert alert-info"><?= htmlspecialchars($tcMensaje) ?></div>
 <?php endif; ?>
 
 <?php if (!empty($errores)): ?>

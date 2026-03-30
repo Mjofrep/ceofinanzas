@@ -199,10 +199,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         throw new RuntimeException('Archivo sin datos.');
       }
 
-      $headerRow = $rows[1];
-      $mapa = obtenerMapaEncabezados($headerRow);
-
       $esTipoCambio = strtolower($tipoHoja) === 'tipo_cambio';
+      $headerRow = $esTipoCambio ? $rows[0] : $rows[1];
+      $mapa = obtenerMapaEncabezados($headerRow);
       $esCapex = strtolower($tipoHoja) === 'capex';
       $esperados = $esTipoCambio
         ? ['moneda','fecha','tipo cambio']
@@ -217,7 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       $previewHeaders = $headerRow;
-      $dataRows = array_slice($rows, 2);
+      $dataRows = $esTipoCambio ? array_slice($rows, 1) : array_slice($rows, 2);
 
       if ($accion === 'guardar') {
         $pdo = db();

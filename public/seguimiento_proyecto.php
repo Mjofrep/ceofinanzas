@@ -52,7 +52,7 @@ if ($proyectoId > 0) {
         SUM(CASE WHEN m.codigo <> 'CLP' AND tc.valor_clp IS NULL THEN 1 ELSE 0 END) AS sin_tc
      FROM ceo_ordenes o
      INNER JOIN ceo_monedas m ON m.id = o.moneda_id
-     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_entrega AND tc.moneda = m.codigo
+     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_contable AND tc.moneda = m.codigo
      WHERE o.proyecto_id = ? AND o.eliminada = 0"
   );
   $stmt->execute([$proyectoId]);
@@ -68,7 +68,7 @@ if ($proyectoId > 0) {
             tc.valor_clp AS tc_valor
      FROM ceo_ordenes o
      INNER JOIN ceo_monedas m ON m.id = o.moneda_id
-     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_entrega AND tc.moneda = m.codigo
+     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = o.fecha_contable AND tc.moneda = m.codigo
      WHERE o.proyecto_id = ? AND o.eliminada = 0
      ORDER BY o.id DESC"
   );
@@ -167,9 +167,9 @@ function formatearMonto(float $monto, string $moneda): string
         </tbody>
       </table>
     </div>
-    <div class="form-hint">Conversión a CLP usa el tipo de cambio de la fecha de entrega de cada orden.</div>
+    <div class="form-hint">Conversión a CLP usa el tipo de cambio de la fecha contable de cada orden.</div>
     <?php if (!empty($sinTc) && $sinTc > 0): ?>
-      <div class="form-hint text-danger">Hay <?= (int)$sinTc ?> orden(es) sin tipo de cambio registrado en su fecha de entrega.</div>
+      <div class="form-hint text-danger">Hay <?= (int)$sinTc ?> orden(es) sin tipo de cambio registrado en su fecha contable.</div>
     <?php endif; ?>
   </div>
 

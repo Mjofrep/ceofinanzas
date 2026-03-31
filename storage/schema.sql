@@ -58,8 +58,11 @@ CREATE TABLE IF NOT EXISTS ceo_ordenes (
   oc VARCHAR(50) NOT NULL,
   contrato VARCHAR(50) DEFAULT NULL,
   fecha_entrega DATE DEFAULT NULL,
+  fecha_contable DATE DEFAULT NULL,
   moneda_id INT NOT NULL,
   pep VARCHAR(80) DEFAULT NULL,
+  tipo_presupuesto VARCHAR(10) NOT NULL DEFAULT 'OPEX',
+  observacion VARCHAR(255) DEFAULT NULL,
   sociedad VARCHAR(20) NOT NULL DEFAULT 'CL13',
   proyecto_id INT NOT NULL,
   monto DECIMAL(18,2) NOT NULL DEFAULT 0,
@@ -121,6 +124,16 @@ CREATE TABLE IF NOT EXISTS ceo_facturas (
   CONSTRAINT fk_ceo_facturas_proveedor FOREIGN KEY (proveedor_id) REFERENCES ceo_proveedores(id),
   CONSTRAINT fk_ceo_facturas_proyecto FOREIGN KEY (proyecto_id) REFERENCES ceo_proyectos(id),
   CONSTRAINT fk_ceo_facturas_moneda FOREIGN KEY (moneda_id) REFERENCES ceo_monedas(id)
+);
+
+CREATE TABLE IF NOT EXISTS ceo_actividad (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuario VARCHAR(120) NOT NULL,
+  accion VARCHAR(120) NOT NULL,
+  detalle VARCHAR(255) DEFAULT NULL,
+  url VARCHAR(255) DEFAULT NULL,
+  ip VARCHAR(45) DEFAULT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS ceo_pagos (

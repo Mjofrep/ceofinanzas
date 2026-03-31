@@ -23,8 +23,8 @@ if ($fechaHasta !== '') {
 $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
 $stmt = $pdo->prepare(
-  "SELECT o.id, o.oc, o.contrato, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
-          o.hes, o.eliminada, m.codigo AS moneda, p.codigo, p.nombre,
+  "SELECT o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
+          o.hes, o.eliminada, o.tipo_presupuesto, o.observacion, m.codigo AS moneda, p.codigo, p.nombre,
           COUNT(a.id) AS adjuntos,
           GROUP_CONCAT(CONCAT(a.ruta, '||', a.nombre_original) SEPARATOR '##') AS adjuntos_lista
    FROM ceo_ordenes o
@@ -32,8 +32,8 @@ $stmt = $pdo->prepare(
    INNER JOIN ceo_proyectos p ON p.id = o.proyecto_id
    LEFT JOIN ceo_ordenes_adjuntos a ON a.orden_id = o.id
    {$whereSql}
-   GROUP BY o.id, o.oc, o.contrato, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
-            o.hes, o.eliminada, m.codigo, p.codigo, p.nombre
+   GROUP BY o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
+            o.hes, o.eliminada, o.tipo_presupuesto, o.observacion, m.codigo, p.codigo, p.nombre
    ORDER BY o.fecha_entrega DESC, o.id DESC"
 );
 $stmt->execute($params);
@@ -80,10 +80,13 @@ function formatearMonto(float $monto, string $moneda): string
           <th>OC</th>
           <th>Proyecto</th>
           <th>Fecha entrega</th>
+          <th>Fecha contable</th>
           <th>Moneda</th>
           <th class="text-end">Monto</th>
           <th class="text-end">Comprometido</th>
           <th>Estado</th>
+          <th>Tipo</th>
+          <th>Observacion</th>
           <th>Estado detalle</th>
           <th>HES</th>
           <th>Adjuntos</th>
@@ -93,7 +96,7 @@ function formatearMonto(float $monto, string $moneda): string
       <tbody>
         <?php if (empty($ordenes)): ?>
           <tr>
-            <td colspan="11" class="text-center text-secondary">Sin registros.</td>
+            <td colspan="14" class="text-center text-secondary">Sin registros.</td>
           </tr>
         <?php else: ?>
           <?php foreach ($ordenes as $o): ?>
@@ -101,10 +104,13 @@ function formatearMonto(float $monto, string $moneda): string
               <td><?= htmlspecialchars($o['oc']) ?></td>
               <td><?= htmlspecialchars(trim($o['codigo'] . ' ' . $o['nombre'])) ?></td>
               <td><?= htmlspecialchars($o['fecha_entrega'] ?? '-') ?></td>
+              <td><?= htmlspecialchars($o['fecha_contable'] ?? '-') ?></td>
               <td><?= htmlspecialchars($o['moneda']) ?></td>
               <td class="text-end"><?= formatearMonto((float)$o['monto'], (string)$o['moneda']) ?></td>
               <td class="text-end"><?= formatearMonto((float)$o['monto_comprometido'], (string)$o['moneda']) ?></td>
               <td><?= htmlspecialchars($o['estado']) ?></td>
+              <td><?= htmlspecialchars($o['tipo_presupuesto'] ?? 'OPEX') ?></td>
+              <td><?= htmlspecialchars($o['observacion'] ?? '-') ?></td>
               <td><?= htmlspecialchars($o['estado_detalle'] === 'Otro' ? ($o['estado_detalle_otro'] ?? 'Otro') : ($o['estado_detalle'] ?? '-')) ?></td>
               <td><?= htmlspecialchars($o['hes'] ?? '-') ?></td>
               <td>

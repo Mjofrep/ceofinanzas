@@ -19,7 +19,9 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
   <header class="topbar">
     <div class="container">
       <div class="brand">
-        <img src="/ceofinanzas/assets/img/logo.png" alt="Logo empresa" class="brand-logo">
+        <button type="button" class="btn btn-link p-0" id="themePickerBtn" aria-label="Cambiar color de fondo">
+          <img src="/ceofinanzas/assets/img/logo.png" alt="Logo empresa" class="brand-logo">
+        </button>
         <div class="brand-title h4 mb-0"><?= APP_NAME ?></div>
         <small class="text-secondary"><?= APP_SUBTITLE ?></small>
       </div>

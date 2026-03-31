@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/activity.php';
 
 $pdo = db();
 $mensaje = '';
@@ -118,8 +119,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $oc = trim($_POST['oc'] ?? '');
   $contrato = trim($_POST['contrato'] ?? '');
   $fechaEntrega = $_POST['fecha_entrega'] ?? null;
+  $fechaContable = $_POST['fecha_contable'] ?? null;
   $monedaId = (int)($_POST['moneda_id'] ?? 0);
   $pep = trim($_POST['pep'] ?? '');
+  $tipoPresupuesto = strtoupper(trim($_POST['tipo_presupuesto'] ?? 'OPEX'));
+  $observacion = trim($_POST['observacion'] ?? '');
   $sociedad = trim($_POST['sociedad'] ?? 'CL13');
   $proyectoId = (int)($_POST['proyecto_id'] ?? 0);
   $monto = limpiarMontoInput((string)($_POST['monto'] ?? '0'));
@@ -133,6 +137,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $stmtMoneda = $pdo->prepare('SELECT codigo FROM ceo_monedas WHERE id = ?');
   $stmtMoneda->execute([$monedaId]);
   $codigoMoneda = (string)($stmtMoneda->fetchColumn() ?: '');
+
+  if ($pep !== '') {
+    $tipoPresupuesto = (str_starts_with(strtoupper($pep), 'NTD')) ? 'CAPEX' : 'OPEX';
+  } else {
+    $tipoPresupuesto = 'OPEX';
+  }
 
   if ($oc === '' || $monedaId <= 0 || $proyectoId <= 0) {
     $errores[] = 'OC, moneda y proyecto son obligatorios.';
@@ -181,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       $stmt = $pdo->prepare(
         'UPDATE ceo_ordenes
-         SET oc = ?, contrato = ?, fecha_entrega = ?, moneda_id = ?, pep = ?, sociedad = ?, proyecto_id = ?, monto = ?, monto_comprometido = ?, estado = ?,
+         SET oc = ?, contrato = ?, fecha_entrega = ?, fecha_contable = ?, moneda_id = ?, pep = ?, tipo_presupuesto = ?, observacion = ?, sociedad = ?, proyecto_id = ?, monto = ?, monto_comprometido = ?, estado = ?,
              estado_detalle = ?, estado_detalle_otro = ?, hes = ?, eliminada = ?
          WHERE id = ?'
       );
@@ -189,8 +199,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $oc,
         $contrato ?: null,
         $fechaEntrega ?: null,
+        $fechaContable ?: null,
         $monedaId,
         $pep ?: null,
+        $tipoPresupuesto,
+        $observacion !== '' ? $observacion : null,
         $sociedad,
         $proyectoId,
         $monto,
@@ -203,6 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ordenId
       ]);
       $mensaje = 'Orden actualizada correctamente.';
+      registrar_actividad($pdo, 'Actualizar orden', 'OC ' . $oc);
 
       if ($prev) {
         $prevTemp = ($prev['estado'] !== 'Pagado' && (int)$prev['eliminada'] === 0) ? (float)$prev['monto_comprometido'] : 0.0;
@@ -228,15 +242,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
     } else {
       $stmt = $pdo->prepare(
-        'INSERT INTO ceo_ordenes (oc, contrato, fecha_entrega, moneda_id, pep, sociedad, proyecto_id, monto, monto_comprometido, estado, estado_detalle, estado_detalle_otro, hes, eliminada)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO ceo_ordenes (oc, contrato, fecha_entrega, fecha_contable, moneda_id, pep, tipo_presupuesto, observacion, sociedad, proyecto_id, monto, monto_comprometido, estado, estado_detalle, estado_detalle_otro, hes, eliminada)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       $stmt->execute([
         $oc,
         $contrato ?: null,
         $fechaEntrega ?: null,
+        $fechaContable ?: null,
         $monedaId,
         $pep ?: null,
+        $tipoPresupuesto,
+        $observacion !== '' ? $observacion : null,
         $sociedad,
         $proyectoId,
         $monto,
@@ -260,6 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       $mensaje = 'Orden registrada correctamente.';
+      registrar_actividad($pdo, 'Registrar orden', 'OC ' . $oc);
     }
 
     if (!empty($_FILES['adjuntos']['name'][0]) && $ordenId > 0) {
@@ -308,8 +326,8 @@ $verEliminadas = isset($_GET['ver_eliminadas']);
 $whereEliminadas = $verEliminadas ? '' : 'WHERE o.eliminada = 0';
 
 $ordenes = $pdo->query(
-  "SELECT o.id, o.oc, o.contrato, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
-          o.hes, o.eliminada, o.moneda_id, o.pep, o.sociedad, o.proyecto_id, m.codigo AS moneda, p.codigo, p.nombre,
+  "SELECT o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
+          o.hes, o.eliminada, o.moneda_id, o.pep, o.tipo_presupuesto, o.observacion, o.sociedad, o.proyecto_id, m.codigo AS moneda, p.codigo, p.nombre,
           COUNT(a.id) AS adjuntos,
           GROUP_CONCAT(CONCAT(a.ruta, '||', a.nombre_original) SEPARATOR '##') AS adjuntos_lista
    FROM ceo_ordenes o
@@ -317,8 +335,8 @@ $ordenes = $pdo->query(
    INNER JOIN ceo_proyectos p ON p.id = o.proyecto_id
    LEFT JOIN ceo_ordenes_adjuntos a ON a.orden_id = o.id
    {$whereEliminadas}
-   GROUP BY o.id, o.oc, o.contrato, o.fecha_entrega, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
-            o.hes, o.eliminada, o.moneda_id, o.pep, o.sociedad, o.proyecto_id, m.codigo, p.codigo, p.nombre
+   GROUP BY o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
+            o.hes, o.eliminada, o.moneda_id, o.pep, o.tipo_presupuesto, o.observacion, o.sociedad, o.proyecto_id, m.codigo, p.codigo, p.nombre
    ORDER BY o.id DESC
    LIMIT 50"
 )->fetchAll();
@@ -384,6 +402,10 @@ if (!empty($ordenes)) {
       <input type="date" class="form-control" name="fecha_entrega">
     </div>
     <div class="col-md-3">
+      <label class="form-label">Fecha contable</label>
+      <input type="date" class="form-control" name="fecha_contable">
+    </div>
+    <div class="col-md-3">
       <label class="form-label">Moneda</label>
       <select class="form-select" name="moneda_id" required>
         <option value="">Seleccione...</option>
@@ -395,6 +417,18 @@ if (!empty($ordenes)) {
     <div class="col-md-4">
       <label class="form-label">Elemento PEP</label>
       <input type="text" class="form-control" name="pep" placeholder="PEP-001">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Observacion</label>
+      <input type="text" class="form-control" name="observacion" placeholder="Observacion">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Tipo presupuesto</label>
+      <select class="form-select" name="tipo_presupuesto">
+        <option value="OPEX">OPEX</option>
+        <option value="CAPEX">CAPEX</option>
+      </select>
+      <div class="form-hint">Si PEP inicia con NTD se fuerza a CAPEX.</div>
     </div>
     <div class="col-md-4">
       <label class="form-label">Sociedad</label>
@@ -474,10 +508,13 @@ if (!empty($ordenes)) {
           <th>OC</th>
           <th>Proyecto</th>
           <th>Fecha entrega</th>
+          <th>Fecha contable</th>
           <th>Moneda</th>
           <th class="text-end">Monto</th>
           <th class="text-end">Comprometido</th>
           <th>Estado</th>
+          <th>Tipo</th>
+          <th>Observacion</th>
           <th>Estado detalle</th>
           <th>HES</th>
           <th>Adjuntos</th>
@@ -497,10 +534,13 @@ if (!empty($ordenes)) {
               <td><?= htmlspecialchars($o['oc']) ?></td>
               <td><?= htmlspecialchars(trim($o['codigo'] . ' ' . $o['nombre'])) ?></td>
               <td><?= htmlspecialchars($o['fecha_entrega'] ?? '-') ?></td>
+              <td><?= htmlspecialchars($o['fecha_contable'] ?? '-') ?></td>
               <td><?= htmlspecialchars($o['moneda']) ?></td>
               <td class="text-end"><?= formatearMonto((float)$o['monto'], (string)$o['moneda']) ?></td>
               <td class="text-end"><?= formatearMonto((float)$o['monto_comprometido'], (string)$o['moneda']) ?></td>
               <td><?= htmlspecialchars($o['estado']) ?></td>
+              <td><?= htmlspecialchars($o['tipo_presupuesto'] ?? 'OPEX') ?></td>
+              <td><?= htmlspecialchars($o['observacion'] ?? '-') ?></td>
               <td><?= htmlspecialchars($o['estado_detalle'] === 'Otro' ? ($o['estado_detalle_otro'] ?? 'Otro') : ($o['estado_detalle'] ?? '-')) ?></td>
               <td><?= htmlspecialchars($o['hes'] ?? '-') ?></td>
               <td>
@@ -527,8 +567,11 @@ if (!empty($ordenes)) {
                         data-oc="<?= htmlspecialchars($o['oc']) ?>"
                         data-contrato="<?= htmlspecialchars($o['contrato'] ?? '') ?>"
                         data-fecha-entrega="<?= htmlspecialchars($o['fecha_entrega'] ?? '') ?>"
+                        data-fecha-contable="<?= htmlspecialchars($o['fecha_contable'] ?? '') ?>"
                         data-moneda-id="<?= htmlspecialchars((string)($o['moneda_id'] ?? '')) ?>"
                         data-pep="<?= htmlspecialchars($o['pep'] ?? '') ?>"
+                        data-tipo-presupuesto="<?= htmlspecialchars($o['tipo_presupuesto'] ?? 'OPEX') ?>"
+                        data-observacion="<?= htmlspecialchars($o['observacion'] ?? '') ?>"
                         data-sociedad="<?= htmlspecialchars($o['sociedad'] ?? 'CL13') ?>"
                         data-proyecto-id="<?= htmlspecialchars((string)($o['proyecto_id'] ?? '')) ?>"
                         data-monto="<?= htmlspecialchars((string)$o['monto']) ?>"

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/activity.php';
 
 $mensaje = '';
 $errores = [];
@@ -430,6 +431,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mensaje = $esTipoCambio
           ? 'Tipo de cambio importado correctamente. Registros procesados: ' . $totalInsertados
           : 'Presupuesto importado correctamente. Registros procesados: ' . $totalInsertados;
+
+        $accionLog = $esTipoCambio ? 'Importar tipo de cambio' : 'Importar presupuesto';
+        $detalleLog = $tipoHoja . ' | Registros: ' . $totalInsertados;
+        registrar_actividad($pdo, $accionLog, $detalleLog);
       } else {
         $preview = array_slice($dataRows, 0, 15);
       }

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/activity.php';
 
 $pdo = db();
 $mensaje = '';
@@ -40,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
     $stmt->execute([$proveedorId, $proyectoId, $factura, $fecha, $monto, $monedaId, $estado]);
     $mensaje = 'Factura registrada correctamente.';
+    registrar_actividad($pdo, 'Registrar factura', 'Factura ' . $factura);
   }
 }
 

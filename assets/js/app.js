@@ -18,8 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
         formOrden.querySelector('[name="oc"]').value = data.oc || '';
         formOrden.querySelector('[name="contrato"]').value = data.contrato || '';
         formOrden.querySelector('[name="fecha_entrega"]').value = data.fechaEntrega || '';
+        formOrden.querySelector('[name="fecha_contable"]').value = data.fechaContable || '';
         formOrden.querySelector('[name="moneda_id"]').value = data.monedaId || '';
         formOrden.querySelector('[name="pep"]').value = data.pep || '';
+        formOrden.querySelector('[name="tipo_presupuesto"]').value = data.tipoPresupuesto || 'OPEX';
+        formOrden.querySelector('[name="observacion"]').value = data.observacion || '';
         formOrden.querySelector('[name="sociedad"]').value = data.sociedad || 'CL13';
         formOrden.querySelector('[name="proyecto_id"]').value = data.proyectoId || '';
         formOrden.querySelector('[name="monto"]').value = data.monto || '';
@@ -36,6 +39,18 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    const pepInput = formOrden.querySelector('[name="pep"]');
+    const tipoSelect = formOrden.querySelector('[name="tipo_presupuesto"]');
+    if (pepInput && tipoSelect) {
+      const syncTipo = () => {
+        const pep = (pepInput.value || '').trim().toUpperCase();
+        tipoSelect.value = pep.startsWith('NTD') ? 'CAPEX' : 'OPEX';
+      };
+      pepInput.addEventListener('input', syncTipo);
+      pepInput.addEventListener('blur', syncTipo);
+      syncTipo();
+    }
+
     if (btnCancelar) {
       btnCancelar.addEventListener('click', () => {
         formOrden.reset();
@@ -43,7 +58,47 @@ document.addEventListener('DOMContentLoaded', () => {
         btnGuardar.classList.remove('d-none');
         btnActualizar.classList.add('d-none');
         btnCancelar.classList.add('d-none');
+        if (pepInput && tipoSelect) {
+          tipoSelect.value = 'OPEX';
+        }
       });
     }
+  }
+
+  const themeButton = document.querySelector('#themePickerBtn');
+  const themeModalEl = document.querySelector('#themeModal');
+  const themeOptions = document.querySelector('#themeOptions');
+  const themeMap = {
+    default: '#f9fbff',
+    white: '#ffffff',
+    black: '#0b0b0b',
+    rose: '#fde8ef',
+    sky: '#eaf5ff',
+    mint: '#ecf9f1'
+  };
+
+  const applyTheme = (key) => {
+    const color = themeMap[key] || themeMap.default;
+    document.documentElement.style.setProperty('--ceo-bg', color);
+    localStorage.setItem('ceoThemeBg', key);
+  };
+
+  const savedTheme = localStorage.getItem('ceoThemeBg');
+  if (savedTheme) {
+    applyTheme(savedTheme);
+  }
+
+  if (themeButton && themeModalEl) {
+    const modal = new bootstrap.Modal(themeModalEl);
+    themeButton.addEventListener('click', () => modal.show());
+  }
+
+  if (themeOptions) {
+    themeOptions.querySelectorAll('[data-theme]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-theme') || 'default';
+        applyTheme(key);
+      });
+    });
   }
 });

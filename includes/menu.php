@@ -32,12 +32,13 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
         </li>
 
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle <?= in_array($currentPage, ['seguimiento_proyecto.php'], true) ? 'active' : '' ?>" href="#" id="seguimientoMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <a class="nav-link dropdown-toggle <?= in_array($currentPage, ['seguimiento_proyecto.php', 'seguimiento_ordenes.php', 'seguimiento_presupuesto_anual.php'], true) ? 'active' : '' ?>" href="#" id="seguimientoMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Seguimiento
           </a>
           <ul class="dropdown-menu" aria-labelledby="seguimientoMenu">
             <li><a class="dropdown-item <?= $currentPage === 'seguimiento_proyecto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_proyecto.php">Proyectos</a></li>
             <li><a class="dropdown-item <?= $currentPage === 'seguimiento_ordenes.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_ordenes.php">Ordenes de Pedido</a></li>
+            <li><a class="dropdown-item <?= $currentPage === 'seguimiento_presupuesto_anual.php' ? 'active' : '' ?>" href="/ceofinanzas/public/seguimiento_presupuesto_anual.php">Presupuesto Anual</a></li>
           </ul>
         </li>
       </ul>

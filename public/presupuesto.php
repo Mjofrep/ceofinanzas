@@ -41,20 +41,42 @@ $sql = "
          cc.tipo AS clase,
          SUM(pm.monto) AS total,
          COALESCE(o.comprometido, 0) AS comprometido,
-         COALESCE(o.ejecutado, 0) AS ejecutado
+         COALESCE(o.real_fecha, 0) AS real_fecha
   FROM ceo_presupuesto_mensual pm
   INNER JOIN ceo_areas a ON a.id = pm.area_id
   INNER JOIN ceo_proyectos p ON p.id = pm.proyecto_id
   INNER JOIN ceo_clase_costo cc ON cc.id = pm.clase_costo_id
-  LEFT JOIN (
-    SELECT proyecto_id,
-           SUM(CASE WHEN estado <> 'Pagado' AND eliminada = 0 THEN monto_comprometido ELSE 0 END) AS comprometido,
-           SUM(CASE WHEN estado = 'Pagado' AND eliminada = 0 THEN monto ELSE 0 END) AS ejecutado
-    FROM ceo_ordenes
-    GROUP BY proyecto_id
-  ) o ON o.proyecto_id = pm.proyecto_id
+   LEFT JOIN (
+     SELECT proyecto_id,
+            SUM(CASE
+                  WHEN o.estado <> 'Pagado' AND o.eliminada = 0 THEN
+                    CASE
+                      WHEN m.codigo = 'CLP' THEN
+                        CASE WHEN o.monto_comprometido > 0 THEN o.monto_comprometido ELSE o.monto END
+                      WHEN tc.valor_clp IS NOT NULL THEN
+                        (CASE WHEN o.monto_comprometido > 0 THEN o.monto_comprometido ELSE o.monto END) * tc.valor_clp
+                      ELSE 0
+                    END
+                  ELSE 0
+                END) AS comprometido,
+            SUM(CASE
+                  WHEN o.estado = 'Pagado'
+                    AND o.eliminada = 0
+                    AND COALESCE(o.fecha_contable, o.fecha_entrega) <= CURDATE() THEN
+                    CASE
+                      WHEN m.codigo = 'CLP' THEN o.monto
+                      WHEN tc.valor_clp IS NOT NULL THEN o.monto * tc.valor_clp
+                      ELSE 0
+                    END
+                  ELSE 0
+                END) AS real_fecha
+     FROM ceo_ordenes o
+     INNER JOIN ceo_monedas m ON m.id = o.moneda_id
+     LEFT JOIN ceo_tipo_cambio tc ON tc.fecha = COALESCE(o.fecha_contable, o.fecha_entrega) AND tc.moneda = m.codigo
+     GROUP BY proyecto_id
+   ) o ON o.proyecto_id = pm.proyecto_id
   WHERE {$where}
-  GROUP BY a.nombre, p.codigo, p.nombre, pm.ceco, cc.tipo, o.comprometido, o.ejecutado
+  GROUP BY a.nombre, p.codigo, p.nombre, pm.ceco, cc.tipo, o.comprometido, o.real_fecha
   ORDER BY a.nombre, p.nombre
 ";
 
@@ -76,7 +98,7 @@ $rows = $stmt->fetchAll();
 <div class="card p-4 mb-4">
   <form class="row g-3" method="get">
     <div class="col-md-3">
-      <label class="form-label">Ano</label>
+      <label class="form-label">Año</label>
       <input type="number" class="form-control" name="anio" value="<?= htmlspecialchars((string)$anio) ?>" min="2024" max="2100">
     </div>
     <div class="col-md-3">
@@ -122,8 +144,8 @@ $rows = $stmt->fetchAll();
           <th>CECO</th>
           <th>Clase</th>
           <th class="text-end">Total</th>
-          <th class="text-end">Comprometido</th>
-          <th class="text-end">Ejecutado</th>
+          <th class="text-end">Total comprometido</th>
+          <th class="text-end">Real a la fecha</th>
           <th class="text-end">Disponible</th>
         </tr>
       </thead>
@@ -137,8 +159,8 @@ $rows = $stmt->fetchAll();
             <?php
               $total = (float)$r['total'];
               $comprometido = (float)$r['comprometido'];
-              $ejecutado = (float)$r['ejecutado'];
-              $disponible = $total - $comprometido - $ejecutado;
+              $realFecha = (float)$r['real_fecha'];
+              $disponible = $total - $comprometido - $realFecha;
             ?>
             <tr>
               <td><?= htmlspecialchars($r['area']) ?></td>
@@ -147,7 +169,7 @@ $rows = $stmt->fetchAll();
               <td><?= htmlspecialchars($r['clase']) ?></td>
               <td class="text-end"><?= number_format($total, 0, ',', '.') ?></td>
               <td class="text-end"><?= number_format($comprometido, 0, ',', '.') ?></td>
-              <td class="text-end"><?= number_format($ejecutado, 0, ',', '.') ?></td>
+              <td class="text-end"><?= number_format($realFecha, 0, ',', '.') ?></td>
               <td class="text-end"><?= number_format($disponible, 0, ',', '.') ?></td>
             </tr>
           <?php endforeach; ?>

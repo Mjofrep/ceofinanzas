@@ -15,11 +15,12 @@ $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
         </li>
 
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle <?= in_array($currentPage, ['import_presupuesto.php','presupuesto.php'], true) ? 'active' : '' ?>" href="#" id="presupuestoMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <a class="nav-link dropdown-toggle <?= in_array($currentPage, ['import_presupuesto.php','import_gastos.php','presupuesto.php'], true) ? 'active' : '' ?>" href="#" id="presupuestoMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Presupuesto
           </a>
           <ul class="dropdown-menu" aria-labelledby="presupuestoMenu">
             <li><a class="dropdown-item <?= $currentPage === 'import_presupuesto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/import_presupuesto.php">Importar Excel</a></li>
+            <li><a class="dropdown-item <?= $currentPage === 'import_gastos.php' ? 'active' : '' ?>" href="/ceofinanzas/public/import_gastos.php">Importar Gastos</a></li>
             <li><a class="dropdown-item <?= $currentPage === 'presupuesto.php' ? 'active' : '' ?>" href="/ceofinanzas/public/presupuesto.php">Ver Presupuesto</a></li>
           </ul>
         </li>

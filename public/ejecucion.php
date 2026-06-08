@@ -323,9 +323,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $verEliminadas = isset($_GET['ver_eliminadas']);
-$whereEliminadas = $verEliminadas ? '' : 'WHERE o.eliminada = 0';
+$ocBusqueda = trim($_GET['oc_busqueda'] ?? '');
 
-$ordenes = $pdo->query(
+$whereParts = [];
+$paramsOrdenes = [];
+
+if (!$verEliminadas) {
+  $whereParts[] = 'o.eliminada = 0';
+}
+
+if ($ocBusqueda !== '') {
+  $whereParts[] = 'o.oc LIKE ?';
+  $paramsOrdenes[] = '%' . $ocBusqueda . '%';
+}
+
+$whereSql = empty($whereParts) ? '' : 'WHERE ' . implode(' AND ', $whereParts);
+
+$stmtOrdenes = $pdo->prepare(
   "SELECT o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
           o.hes, o.eliminada, o.moneda_id, o.pep, o.tipo_presupuesto, o.observacion, o.sociedad, o.proyecto_id, m.codigo AS moneda, p.codigo, p.nombre,
           COUNT(a.id) AS adjuntos,
@@ -334,12 +348,14 @@ $ordenes = $pdo->query(
    INNER JOIN ceo_monedas m ON m.id = o.moneda_id
    INNER JOIN ceo_proyectos p ON p.id = o.proyecto_id
    LEFT JOIN ceo_ordenes_adjuntos a ON a.orden_id = o.id
-   {$whereEliminadas}
+   {$whereSql}
    GROUP BY o.id, o.oc, o.contrato, o.fecha_entrega, o.fecha_contable, o.monto, o.monto_comprometido, o.estado, o.estado_detalle, o.estado_detalle_otro,
             o.hes, o.eliminada, o.moneda_id, o.pep, o.tipo_presupuesto, o.observacion, o.sociedad, o.proyecto_id, m.codigo, p.codigo, p.nombre
    ORDER BY o.id DESC
    LIMIT 50"
-)->fetchAll();
+);
+$stmtOrdenes->execute($paramsOrdenes);
+$ordenes = $stmtOrdenes->fetchAll();
 
 $movimientosPorOrden = [];
 if (!empty($ordenes)) {
@@ -497,10 +513,33 @@ if (!empty($ordenes)) {
 <div class="card p-4">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h3 class="h6 section-title mb-0">Ordenes Registradas</h3>
-    <a class="btn btn-sm btn-outline-secondary" href="/ceofinanzas/public/ejecucion.php<?= $verEliminadas ? '' : '?ver_eliminadas=1' ?>">
+    <?php
+      $toggleParams = [];
+      if (!$verEliminadas) {
+        $toggleParams['ver_eliminadas'] = '1';
+      }
+      if ($ocBusqueda !== '') {
+        $toggleParams['oc_busqueda'] = $ocBusqueda;
+      }
+      $toggleUrl = '/ceofinanzas/public/ejecucion.php' . (empty($toggleParams) ? '' : '?' . http_build_query($toggleParams));
+    ?>
+    <a class="btn btn-sm btn-outline-secondary" href="<?= htmlspecialchars($toggleUrl) ?>">
       <?= $verEliminadas ? 'Ocultar eliminadas' : 'Ver eliminadas' ?>
     </a>
   </div>
+  <form class="row g-3 mb-3" method="get">
+    <?php if ($verEliminadas): ?>
+      <input type="hidden" name="ver_eliminadas" value="1">
+    <?php endif; ?>
+    <div class="col-md-4">
+      <label class="form-label">Buscar por OC</label>
+      <input type="text" class="form-control" name="oc_busqueda" value="<?= htmlspecialchars($ocBusqueda) ?>" placeholder="6700150816">
+    </div>
+    <div class="col-md-4 d-flex align-items-end gap-2">
+      <button type="submit" class="btn btn-primary">Filtrar</button>
+      <a class="btn btn-outline-secondary" href="/ceofinanzas/public/ejecucion.php<?= $verEliminadas ? '?ver_eliminadas=1' : '' ?>">Limpiar</a>
+    </div>
+  </form>
   <div class="table-responsive">
     <table class="table table-striped align-middle">
       <thead>

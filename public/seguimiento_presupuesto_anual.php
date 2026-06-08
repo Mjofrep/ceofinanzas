@@ -5,6 +5,8 @@ require_once __DIR__ . '/../config/db.php';
 
 $pdo = db();
 $anio = (int)($_GET['anio'] ?? date('Y'));
+$mesSeleccionado = (int)($_GET['mes'] ?? 0);
+$mesSeleccionado = ($mesSeleccionado >= 1 && $mesSeleccionado <= 12) ? $mesSeleccionado : 0;
 
 $stmt = $pdo->prepare(
   "SELECT p.id,
@@ -108,7 +110,13 @@ $totales_generales = [
   <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
     <div>
       <h2 class="h5 mb-1">Seguimiento Anual de Presupuesto</h2>
-      <p class="text-secondary mb-0">Presupuesto, aprovisionado + pagado y diferencia por proyecto CEO.</p>
+      <p class="text-secondary mb-0">
+        <?php if ($mesSeleccionado > 0): ?>
+          Presupuesto, aprovisionado + pagado y diferencia acumulados por proyecto CEO hasta <?= htmlspecialchars($meses[$mesSeleccionado]) ?>.
+        <?php else: ?>
+          Presupuesto, aprovisionado + pagado y diferencia por proyecto CEO.
+        <?php endif; ?>
+      </p>
     </div>
   </div>
 </div>
@@ -116,7 +124,16 @@ $totales_generales = [
 <div class="card p-4 mb-4">
   <form class="row g-3" method="get">
     <div class="col-md-3">
-      <label class="form-label">Ano</label>
+      <label class="form-label">Mes</label>
+      <select class="form-select" name="mes">
+        <option value="0">Todos</option>
+        <?php foreach ($meses as $numero_mes => $nombre_mes): ?>
+          <option value="<?= $numero_mes ?>" <?= $mesSeleccionado === $numero_mes ? 'selected' : '' ?>><?= htmlspecialchars($nombre_mes) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Año</label>
       <input type="number" class="form-control" name="anio" value="<?= htmlspecialchars((string)$anio) ?>" min="2024" max="2100">
     </div>
     <div class="col-md-3 d-flex align-items-end">
@@ -131,29 +148,40 @@ $totales_generales = [
 <div class="card p-4">
   <div class="table-responsive presupuesto-anual-wrapper">
     <table class="table table-striped align-middle presupuesto-anual-table">
-      <thead>
-        <tr>
-          <th rowspan="2">Proyecto</th>
-          <?php foreach ($meses as $mes_nombre): ?>
-            <th colspan="3" class="text-center"><?= htmlspecialchars($mes_nombre) ?></th>
-          <?php endforeach; ?>
-          <th colspan="3" class="text-center">Total</th>
-        </tr>
-        <tr>
-          <?php foreach ($meses as $_): ?>
+      <?php if ($mesSeleccionado > 0): ?>
+        <thead>
+          <tr>
+            <th>Proyecto</th>
+            <th class="text-end">Presupuesto acumulado</th>
+            <th class="text-end">Real acumulado</th>
+            <th class="text-end">Diferencia</th>
+          </tr>
+        </thead>
+      <?php else: ?>
+        <thead>
+          <tr>
+            <th rowspan="2">Proyecto</th>
+            <?php foreach ($meses as $mes_nombre): ?>
+              <th colspan="3" class="text-center"><?= htmlspecialchars($mes_nombre) ?></th>
+            <?php endforeach; ?>
+            <th colspan="3" class="text-center">Total</th>
+          </tr>
+          <tr>
+            <?php foreach ($meses as $_): ?>
+              <th class="text-end">Pres</th>
+              <th class="text-end">Real</th>
+              <th class="text-end">Diferencia</th>
+            <?php endforeach; ?>
             <th class="text-end">Pres</th>
             <th class="text-end">Real</th>
             <th class="text-end">Diferencia</th>
-          <?php endforeach; ?>
-          <th class="text-end">Pres</th>
-          <th class="text-end">Real</th>
-          <th class="text-end">Diferencia</th>
-        </tr>
-      </thead>
+          </tr>
+        </thead>
+      <?php endif; ?>
       <tbody>
         <?php if (empty($presupuestos)): ?>
           <tr>
-            <td colspan="40" class="text-center text-secondary">Sin registros.</td>
+            <td colspan="<?= $mesSeleccionado > 0 ? '4' : '40' ?>" class="text-center text-secondary">Sin registros.</td>
           </tr>
         <?php else: ?>
           <?php foreach ($presupuestos as $row): ?>
@@ -167,41 +195,65 @@ $totales_generales = [
                 <div class="fw-semibold"><?= htmlspecialchars($row['codigo']) ?></div>
                 <div class="small text-secondary"><?= htmlspecialchars($row['nombre']) ?></div>
               </td>
-              <?php foreach (array_keys($meses) as $mes): ?>
+              <?php if ($mesSeleccionado > 0): ?>
                 <?php
-                  $presupuesto = (float)$row['presupuesto_' . $mes];
-                  $consumido = (float)($consumos_por_proyecto[$proyecto_id][$mes] ?? 0.0);
-                  $diferencia = $presupuesto - $consumido;
-                  $total_consumido += $consumido;
-                  $totales_mes[$mes]['presupuesto'] += $presupuesto;
-                  $totales_mes[$mes]['real'] += $consumido;
-                  $totales_mes[$mes]['diferencia'] += $diferencia;
+                  $presupuesto_acumulado = 0.0;
+                  $real_acumulado = 0.0;
+                  for ($mes = 1; $mes <= $mesSeleccionado; $mes++) {
+                    $presupuesto_acumulado += (float)$row['presupuesto_' . $mes];
+                    $real_acumulado += (float)($consumos_por_proyecto[$proyecto_id][$mes] ?? 0.0);
+                  }
+                  $diferencia_acumulada = $presupuesto_acumulado - $real_acumulado;
+                  $totales_generales['presupuesto'] += $presupuesto_acumulado;
+                  $totales_generales['real'] += $real_acumulado;
+                  $totales_generales['diferencia'] += $diferencia_acumulada;
                 ?>
-                <td class="text-end detalle-mes"><?= monto_formateado($presupuesto) ?></td>
-                <td class="text-end detalle-mes"><?= monto_formateado($consumido) ?></td>
-                <td class="text-end detalle-mes <?= $diferencia < 0 ? 'text-danger' : 'text-secondary' ?>"><?= monto_formateado($diferencia) ?></td>
-              <?php endforeach; ?>
-              <?php
-                $total_diferencia = $total_presupuesto - $total_consumido;
-                $totales_generales['presupuesto'] += $total_presupuesto;
-                $totales_generales['real'] += $total_consumido;
-                $totales_generales['diferencia'] += $total_diferencia;
-              ?>
-              <td class="text-end detalle-mes"><?= monto_formateado($total_presupuesto) ?></td>
-              <td class="text-end detalle-mes"><?= monto_formateado($total_consumido) ?></td>
-              <td class="text-end detalle-mes <?= $total_diferencia < 0 ? 'text-danger' : 'text-secondary' ?>"><?= monto_formateado($total_diferencia) ?></td>
+                <td class="text-end detalle-mes"><?= monto_formateado($presupuesto_acumulado) ?></td>
+                <td class="text-end detalle-mes"><?= monto_formateado($real_acumulado) ?></td>
+                <td class="text-end detalle-mes <?= $diferencia_acumulada < 0 ? 'text-danger' : 'text-secondary' ?>"><?= monto_formateado($diferencia_acumulada) ?></td>
+              <?php else: ?>
+                <?php foreach (array_keys($meses) as $mes): ?>
+                  <?php
+                    $presupuesto = (float)$row['presupuesto_' . $mes];
+                    $consumido = (float)($consumos_por_proyecto[$proyecto_id][$mes] ?? 0.0);
+                    $diferencia = $presupuesto - $consumido;
+                    $total_consumido += $consumido;
+                    $totales_mes[$mes]['presupuesto'] += $presupuesto;
+                    $totales_mes[$mes]['real'] += $consumido;
+                    $totales_mes[$mes]['diferencia'] += $diferencia;
+                  ?>
+                  <td class="text-end detalle-mes"><?= monto_formateado($presupuesto) ?></td>
+                  <td class="text-end detalle-mes"><?= monto_formateado($consumido) ?></td>
+                  <td class="text-end detalle-mes <?= $diferencia < 0 ? 'text-danger' : 'text-secondary' ?>"><?= monto_formateado($diferencia) ?></td>
+                <?php endforeach; ?>
+                <?php
+                  $total_diferencia = $total_presupuesto - $total_consumido;
+                  $totales_generales['presupuesto'] += $total_presupuesto;
+                  $totales_generales['real'] += $total_consumido;
+                  $totales_generales['diferencia'] += $total_diferencia;
+                ?>
+                <td class="text-end detalle-mes"><?= monto_formateado($total_presupuesto) ?></td>
+                <td class="text-end detalle-mes"><?= monto_formateado($total_consumido) ?></td>
+                <td class="text-end detalle-mes <?= $total_diferencia < 0 ? 'text-danger' : 'text-secondary' ?>"><?= monto_formateado($total_diferencia) ?></td>
+              <?php endif; ?>
             </tr>
           <?php endforeach; ?>
           <tr class="table-secondary fw-semibold">
             <td>Total</td>
-            <?php foreach (array_keys($meses) as $mes): ?>
-              <td class="text-end detalle-mes"><?= monto_formateado($totales_mes[$mes]['presupuesto']) ?></td>
-              <td class="text-end detalle-mes"><?= monto_formateado($totales_mes[$mes]['real']) ?></td>
-              <td class="text-end detalle-mes <?= $totales_mes[$mes]['diferencia'] < 0 ? 'text-danger' : '' ?>"><?= monto_formateado($totales_mes[$mes]['diferencia']) ?></td>
-            <?php endforeach; ?>
-            <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['presupuesto']) ?></td>
-            <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['real']) ?></td>
-            <td class="text-end detalle-mes <?= $totales_generales['diferencia'] < 0 ? 'text-danger' : '' ?>"><?= monto_formateado($totales_generales['diferencia']) ?></td>
+            <?php if ($mesSeleccionado > 0): ?>
+              <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['presupuesto']) ?></td>
+              <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['real']) ?></td>
+              <td class="text-end detalle-mes <?= $totales_generales['diferencia'] < 0 ? 'text-danger' : '' ?>"><?= monto_formateado($totales_generales['diferencia']) ?></td>
+            <?php else: ?>
+              <?php foreach (array_keys($meses) as $mes): ?>
+                <td class="text-end detalle-mes"><?= monto_formateado($totales_mes[$mes]['presupuesto']) ?></td>
+                <td class="text-end detalle-mes"><?= monto_formateado($totales_mes[$mes]['real']) ?></td>
+                <td class="text-end detalle-mes <?= $totales_mes[$mes]['diferencia'] < 0 ? 'text-danger' : '' ?>"><?= monto_formateado($totales_mes[$mes]['diferencia']) ?></td>
+              <?php endforeach; ?>
+              <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['presupuesto']) ?></td>
+              <td class="text-end detalle-mes"><?= monto_formateado($totales_generales['real']) ?></td>
+              <td class="text-end detalle-mes <?= $totales_generales['diferencia'] < 0 ? 'text-danger' : '' ?>"><?= monto_formateado($totales_generales['diferencia']) ?></td>
+            <?php endif; ?>
           </tr>
         <?php endif; ?>
       </tbody>

@@ -95,7 +95,7 @@ function formatearMonto(float $monto, string $moneda): string
 <div class="card p-4 mb-4">
   <form class="row g-3" method="get">
     <div class="col-md-3">
-      <label class="form-label">Ano</label>
+        <label class="form-label">Año</label>
       <input type="number" class="form-control" name="anio" value="<?= htmlspecialchars((string)$anio) ?>" min="2024" max="2100">
     </div>
     <div class="col-md-6">

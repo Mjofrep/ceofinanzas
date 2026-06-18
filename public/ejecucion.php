@@ -510,7 +510,7 @@ if (!empty($ordenes)) {
   </form>
 </div>
 
-<div class="card p-4">
+<div class="card p-4 ordenes-registradas-card">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h3 class="h6 section-title mb-0">Ordenes Registradas</h3>
     <?php
@@ -540,26 +540,26 @@ if (!empty($ordenes)) {
       <a class="btn btn-outline-secondary" href="/ceofinanzas/public/ejecucion.php<?= $verEliminadas ? '?ver_eliminadas=1' : '' ?>">Limpiar</a>
     </div>
   </form>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
+  <div class="table-responsive ordenes-registradas-wrap">
+    <table class="table table-striped align-middle ordenes-registradas-table">
       <thead>
         <tr>
           <th>OC</th>
           <th>Proyecto</th>
-          <th>Fecha entrega</th>
-          <th>Fecha contable</th>
+          <th>F. entrega</th>
+          <th>F. contable</th>
           <th>Moneda</th>
           <th class="text-end">Monto</th>
-          <th class="text-end">Comprometido</th>
+          <th class="text-end">Comprom.</th>
           <th>Estado</th>
           <th>Tipo</th>
-          <th>Observacion</th>
-          <th>Estado detalle</th>
+          <th>Obs.</th>
+          <th>Estado det.</th>
           <th>HES</th>
           <th>Adjuntos</th>
-          <th>Eliminada</th>
-          <th>Acciones</th>
-          <th>Historial</th>
+          <th>Elim.</th>
+          <th>Acc.</th>
+          <th>Hist.</th>
         </tr>
       </thead>
       <tbody>
@@ -601,7 +601,7 @@ if (!empty($ordenes)) {
               </td>
               <td><?= (int)$o['eliminada'] === 1 ? 'Si' : 'No' ?></td>
               <td>
-                <button type="button" class="btn btn-sm btn-outline-primary" data-orden-edit
+                <button type="button" class="btn btn-sm btn-outline-primary" title="Editar orden" aria-label="Editar orden" data-orden-edit
                         data-id="<?= (int)$o['id'] ?>"
                         data-oc="<?= htmlspecialchars($o['oc']) ?>"
                         data-contrato="<?= htmlspecialchars($o['contrato'] ?? '') ?>"
@@ -620,11 +620,11 @@ if (!empty($ordenes)) {
                         data-estado-detalle="<?= htmlspecialchars($o['estado_detalle'] ?? 'Ingresado') ?>"
                         data-estado-detalle-otro="<?= htmlspecialchars($o['estado_detalle_otro'] ?? '') ?>"
                         data-eliminada="<?= (int)$o['eliminada'] ?>">
-                  Editar
+                  Edit.
                 </button>
               </td>
               <td>
-                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#historial-<?= (int)$o['id'] ?>" aria-expanded="false" aria-controls="historial-<?= (int)$o['id'] ?>">
+                <button class="btn btn-sm btn-outline-secondary" type="button" title="Ver historial" aria-label="Ver historial" data-bs-toggle="collapse" data-bs-target="#historial-<?= (int)$o['id'] ?>" aria-expanded="false" aria-controls="historial-<?= (int)$o['id'] ?>">
                   Ver
                 </button>
               </td>

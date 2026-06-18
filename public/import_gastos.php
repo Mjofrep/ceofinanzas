@@ -7,12 +7,14 @@ require_once __DIR__ . '/../config/activity.php';
 
 $fatal_error = false;
 $mensaje = '';
+$aviso = '';
 $errores = [];
 $preview = [];
 $preview_headers = [];
 $archivo_guardado = '';
 $archivo_original = '';
 $guardado = false;
+$lote_recien_guardado_id = 0;
 $monedas_validas = ['CLP', 'UF', 'USD', 'EUR'];
 
 function normalizar_texto(string $value): string
@@ -39,6 +41,22 @@ function obtener_mapa_encabezados_gastos(array $header): array
     }
   }
   return $mapa;
+}
+
+function indice_columna_gastos(array $mapa, string $columna): ?int
+{
+  static $aliases = [
+    'descr. clase de coste' => ['descrip.clases coste'],
+  ];
+
+  $candidatos = array_merge([$columna], $aliases[$columna] ?? []);
+  foreach ($candidatos as $candidato) {
+    if (isset($mapa[$candidato])) {
+      return (int)$mapa[$candidato];
+    }
+  }
+
+  return null;
 }
 
 function detectar_fila_encabezado_gastos(array $rows, array $esperados, int $max_filas = 5): array
@@ -151,10 +169,11 @@ function periodo_a_numero(mixed $value): ?int
 
 function valor_columna(array $row, array $mapa, string $columna): string
 {
-  if (!isset($mapa[$columna])) {
+  $indice = indice_columna_gastos($mapa, $columna);
+  if ($indice === null) {
     return '';
   }
-  return trim((string)($row[$mapa[$columna]] ?? ''));
+  return trim((string)($row[$indice] ?? ''));
 }
 
 function resolver_area_id(array $areas_por_nombre, string $area): ?int
@@ -175,18 +194,91 @@ function resolver_proyecto_id(array $proyectos_por_codigo, array $proyectos_por_
   return $proyectos_por_nombre[$key] ?? null;
 }
 
-function resolver_proyecto_final(?int $proyecto_oc_id, ?int $proyecto_actividad_id): array
+function es_nombre_persona_gastos(string $proveedor_nombre): bool
 {
-  if ($proyecto_oc_id !== null && $proyecto_actividad_id !== null) {
-    if ($proyecto_oc_id === $proyecto_actividad_id) {
-      return [$proyecto_oc_id, 'oc_y_actividad', 0, null];
-    }
+  $tokens = preg_split('/\s+/', preg_replace('/[^a-z ]+/', ' ', normalizar_texto($proveedor_nombre)) ?? '');
+  $tokens = array_values(array_filter($tokens, static fn($token) => $token !== ''));
+  if (count($tokens) < 3) {
+    return false;
+  }
 
-    return [null, 'conflicto', 1, 'Conflicto entre proyecto de OC existente y proyecto detectado por actividad'];
+  $marcas_empresa = [
+    'spa', 'sa', 'ltda', 'limitada', 'fundacion', 'corporacion', 'consultoria',
+    'ingenieria', 'comercial', 'transportes', 'gestion', 'proyectos', 'servicios',
+    'sociedad', 'empresa', 'chile',
+  ];
+
+  foreach ($tokens as $token) {
+    if (in_array($token, $marcas_empresa, true)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function resolver_proyecto_regla_gastos(array $proyectos_por_codigo, array $proyectos_por_nombre, string $contrato_marco, string $proveedor_nombre): array
+{
+  $mapa_contrato_marco = [
+    'ja10183646' => 'Pers. Apoyo CEO',
+    'ja10161035' => 'Pers. Apoyo CEO',
+    'ja10160111' => 'Otros Gastos CEO',
+    'ja10135848' => 'Consumo de Articulos de Aseo y oficina',
+    'ja10122226' => 'Servicios De Taxi Y Radiotaxi',
+    'ja10149193' => 'Servicio de alimentación (café, cocktail, almuerzos)',
+    'ja10156352' => 'Habilitaciones',
+    'ja10156353' => 'Habilitaciones',
+  ];
+
+  $contrato_key = normalizar_texto($contrato_marco);
+  if ($contrato_key !== '' && isset($mapa_contrato_marco[$contrato_key])) {
+    return [
+      resolver_proyecto_id($proyectos_por_codigo, $proyectos_por_nombre, $mapa_contrato_marco[$contrato_key]),
+      'contrato_marco',
+    ];
+  }
+
+  $proveedor_key = normalizar_texto($proveedor_nombre);
+  if ($proveedor_key !== '' && str_contains($proveedor_key, 'capacit')) {
+    return [
+      resolver_proyecto_id($proyectos_por_codigo, $proyectos_por_nombre, 'Formaciones'),
+      'nombre_proveedor',
+    ];
+  }
+
+  if ($proveedor_key !== '' && es_nombre_persona_gastos($proveedor_nombre)) {
+    return [
+      resolver_proyecto_id($proyectos_por_codigo, $proyectos_por_nombre, 'Alumno en práctica'),
+      'nombre_proveedor',
+    ];
+  }
+
+  return [null, null];
+}
+
+function resolver_proyecto_final(?int $proyecto_oc_id, ?int $proyecto_regla_id, ?int $proyecto_actividad_id): array
+{
+  $candidatos = [];
+  if ($proyecto_oc_id !== null) {
+    $candidatos['oc_existente'] = $proyecto_oc_id;
+  }
+  if ($proyecto_regla_id !== null) {
+    $candidatos['regla_importacion'] = $proyecto_regla_id;
+  }
+  if ($proyecto_actividad_id !== null) {
+    $candidatos['detalle_actividad'] = $proyecto_actividad_id;
+  }
+
+  if (count(array_unique(array_values($candidatos))) > 1) {
+    return [null, 'conflicto', 1, 'Conflicto entre proyecto de OC existente y proyecto detectado en la importacion'];
   }
 
   if ($proyecto_oc_id !== null) {
-    return [$proyecto_oc_id, 'oc_existente', 0, null];
+    return [$proyecto_oc_id, count($candidatos) > 1 ? 'oc_y_importacion' : 'oc_existente', 0, null];
+  }
+
+  if ($proyecto_regla_id !== null) {
+    return [$proyecto_regla_id, 'regla_importacion', 0, null];
   }
 
   if ($proyecto_actividad_id !== null) {
@@ -493,7 +585,12 @@ try {
   ensure_import_gastos_schema($pdo);
 
   $areas = $pdo->query('SELECT id, nombre FROM ceo_areas ORDER BY nombre')->fetchAll();
-  $proyectos = $pdo->query('SELECT id, codigo, nombre FROM ceo_proyectos ORDER BY codigo, nombre')->fetchAll();
+  $proyectos = $pdo->query(
+    'SELECT p.id, p.codigo, p.nombre, p.area_id, a.nombre AS area_nombre
+     FROM ceo_proyectos p
+     INNER JOIN ceo_areas a ON a.id = p.area_id
+     ORDER BY p.codigo, p.nombre'
+  )->fetchAll();
   $monedas = $pdo->query('SELECT id, codigo FROM ceo_monedas ORDER BY codigo')->fetchAll();
 
   $areas_por_nombre = [];
@@ -503,9 +600,14 @@ try {
 
   $proyectos_por_codigo = [];
   $proyectos_por_nombre = [];
+  $proyectos_meta = [];
   foreach ($proyectos as $proyecto) {
     $proyectos_por_codigo[normalizar_texto((string)$proyecto['codigo'])] = (int)$proyecto['id'];
     $proyectos_por_nombre[normalizar_texto((string)$proyecto['nombre'])] = (int)$proyecto['id'];
+    $proyectos_meta[(int)$proyecto['id']] = [
+      'area_id' => (int)$proyecto['area_id'],
+      'area_nombre' => (string)$proyecto['area_nombre'],
+    ];
   }
 
   $moneda_clp_id = 0;
@@ -573,10 +675,7 @@ try {
           'fe.contabilizacion',
           'n docum.refer.',
           'documento compras',
-          'valor/moneda objeto',
-          'tipo proyecto',
-          'area',
-          'detalle actividad'
+          'valor/moneda objeto'
         ];
 
         [$header_index, $header_row, $mapa] = detectar_fila_encabezado_gastos($rows, $esperados, 5);
@@ -600,8 +699,15 @@ try {
              LIMIT 1'
           );
 
+          $stmt_import_existente = $pdo->prepare(
+            'SELECT id
+             FROM ceo_import_gastos
+             WHERE hash_unico = ?
+             LIMIT 1'
+          );
+
           $insert = $pdo->prepare(
-            'INSERT IGNORE INTO ceo_import_gastos (
+            'INSERT INTO ceo_import_gastos (
               lote_id,
               origen_archivo, hash_unico, pep, fecha_documento, periodo, fecha_contable, numero_doc_refer,
               documento_compra, clase_costo_codigo, clase_costo_descripcion, texto_cabecera, texto_pedido,
@@ -609,7 +715,54 @@ try {
               area_nombre, categoria_pxq, detalle_actividad, comentarios, detalle_actividad_mes,
               area_id, proyecto_id, proyecto_oc_id, proyecto_actividad_id, origen_proyecto, conflicto_proyecto, estado_revision, observacion_revision,
               orden_existente_id, estado_orden_existente, moneda_importada_codigo, moneda_orden_existente_codigo, monto_orden_existente, monto_convertido_orden, detalle_conversion, comparacion_monto
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' 
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              lote_id = VALUES(lote_id),
+              origen_archivo = VALUES(origen_archivo),
+              pep = VALUES(pep),
+              fecha_documento = VALUES(fecha_documento),
+              periodo = VALUES(periodo),
+              fecha_contable = VALUES(fecha_contable),
+              numero_doc_refer = VALUES(numero_doc_refer),
+              documento_compra = VALUES(documento_compra),
+              clase_costo_codigo = VALUES(clase_costo_codigo),
+              clase_costo_descripcion = VALUES(clase_costo_descripcion),
+              texto_cabecera = VALUES(texto_cabecera),
+              texto_pedido = VALUES(texto_pedido),
+              ceco = VALUES(ceco),
+              monto = VALUES(monto),
+              moneda_codigo = VALUES(moneda_codigo),
+              proveedor_nombre = VALUES(proveedor_nombre),
+              contrato_marco = VALUES(contrato_marco),
+              validador = VALUES(validador),
+              tipo_proyecto = VALUES(tipo_proyecto),
+              area_nombre = VALUES(area_nombre),
+              categoria_pxq = VALUES(categoria_pxq),
+              detalle_actividad = VALUES(detalle_actividad),
+              comentarios = VALUES(comentarios),
+              detalle_actividad_mes = VALUES(detalle_actividad_mes),
+              area_id = VALUES(area_id),
+              proyecto_id = VALUES(proyecto_id),
+              proyecto_oc_id = VALUES(proyecto_oc_id),
+              proyecto_actividad_id = VALUES(proyecto_actividad_id),
+              origen_proyecto = VALUES(origen_proyecto),
+              conflicto_proyecto = VALUES(conflicto_proyecto),
+              estado_revision = CASE
+                WHEN pasado_a_orden_id IS NOT NULL THEN "pasado"
+                ELSE VALUES(estado_revision)
+              END,
+              observacion_revision = CASE
+                WHEN pasado_a_orden_id IS NOT NULL THEN observacion_revision
+                ELSE VALUES(observacion_revision)
+              END,
+              orden_existente_id = VALUES(orden_existente_id),
+              estado_orden_existente = VALUES(estado_orden_existente),
+              moneda_importada_codigo = VALUES(moneda_importada_codigo),
+              moneda_orden_existente_codigo = VALUES(moneda_orden_existente_codigo),
+              monto_orden_existente = VALUES(monto_orden_existente),
+              monto_convertido_orden = VALUES(monto_convertido_orden),
+              detalle_conversion = VALUES(detalle_conversion),
+              comparacion_monto = VALUES(comparacion_monto)' 
           );
 
           $pdo->beginTransaction();
@@ -618,13 +771,17 @@ try {
           $lote_id = (int)$pdo->lastInsertId();
           $tc_cache = [];
           $insertados = 0;
-          $omitidos = 0;
+          $actualizados = 0;
 
           foreach ($data_rows as $row) {
             $pep = valor_columna($row, $mapa, 'elemento pep');
-            $fecha_documento = excel_serial_a_fecha($row[$mapa['fecha de documento']] ?? null);
-            $periodo = periodo_a_numero($row[$mapa['periodo']] ?? null);
-            $fecha_contable = excel_serial_a_fecha($row[$mapa['fe.contabilizacion']] ?? null);
+            $fecha_documento_idx = indice_columna_gastos($mapa, 'fecha de documento');
+            $periodo_idx = indice_columna_gastos($mapa, 'periodo');
+            $fecha_contable_idx = indice_columna_gastos($mapa, 'fe.contabilizacion');
+            $monto_idx = indice_columna_gastos($mapa, 'valor/moneda objeto');
+            $fecha_documento = excel_serial_a_fecha($fecha_documento_idx !== null ? ($row[$fecha_documento_idx] ?? null) : null);
+            $periodo = periodo_a_numero($periodo_idx !== null ? ($row[$periodo_idx] ?? null) : null);
+            $fecha_contable = excel_serial_a_fecha($fecha_contable_idx !== null ? ($row[$fecha_contable_idx] ?? null) : null);
             $numero_doc_refer = valor_columna($row, $mapa, 'n docum.refer.');
             $documento_compra = valor_columna($row, $mapa, 'documento compras');
             $clase_costo_codigo = valor_columna($row, $mapa, 'clase de coste');
@@ -632,7 +789,7 @@ try {
             $texto_cabecera = valor_columna($row, $mapa, 'texto de cabecera de documento');
             $texto_pedido = valor_columna($row, $mapa, 'texto de pedido');
             $ceco = valor_columna($row, $mapa, 'ceco responsable');
-            $monto = limpiar_monto_gastos((string)($row[$mapa['valor/moneda objeto']] ?? ''));
+            $monto = limpiar_monto_gastos((string)($monto_idx !== null ? ($row[$monto_idx] ?? '') : ''));
             $proveedor_nombre = valor_columna($row, $mapa, 'nombre proveedor');
             $contrato_marco = valor_columna($row, $mapa, 'contrato marco');
             $validador = valor_columna($row, $mapa, 'validador');
@@ -649,6 +806,12 @@ try {
 
             $area_id = resolver_area_id($areas_por_nombre, $area_nombre);
             $proyecto_actividad_id = resolver_proyecto_id($proyectos_por_codigo, $proyectos_por_nombre, $detalle_actividad);
+            [$proyecto_regla_id, $origen_regla] = resolver_proyecto_regla_gastos(
+              $proyectos_por_codigo,
+              $proyectos_por_nombre,
+              $contrato_marco,
+              $proveedor_nombre
+            );
             $orden_existente_id = null;
             $estado_orden_existente = null;
             $moneda_importada_codigo = 'CLP';
@@ -678,7 +841,25 @@ try {
               }
             }
 
-            [$proyecto_id, $origen_proyecto, $conflicto_proyecto, $observacion_conflicto] = resolver_proyecto_final($proyecto_oc_id, $proyecto_actividad_id);
+            [$proyecto_id, $origen_proyecto, $conflicto_proyecto, $observacion_conflicto] = resolver_proyecto_final(
+              $proyecto_oc_id,
+              $proyecto_regla_id,
+              $proyecto_actividad_id
+            );
+            if ($origen_proyecto === 'regla_importacion' && $origen_regla !== null) {
+              $origen_proyecto = $origen_regla;
+            }
+
+            if ($area_id === null && $proyecto_id !== null && isset($proyectos_meta[$proyecto_id])) {
+              $area_id = $proyectos_meta[$proyecto_id]['area_id'];
+              if ($area_nombre === '') {
+                $area_nombre = $proyectos_meta[$proyecto_id]['area_nombre'];
+              }
+            }
+
+            if (!in_array($tipo_proyecto, ['OPEX', 'CAPEX'], true)) {
+              $tipo_proyecto = 'OPEX';
+            }
             $estado_revision = $conflicto_proyecto === 1
               ? 'conflicto_proyecto'
               : estado_revision_inicial($proyecto_id, $documento_compra, $monto);
@@ -701,6 +882,9 @@ try {
               normalizar_texto($detalle_actividad),
               normalizar_texto($proveedor_nombre)
             ]);
+
+            $stmt_import_existente->execute([$hash_unico]);
+            $import_existente = $stmt_import_existente->fetch();
 
             $insert->execute([
               $lote_id,
@@ -746,17 +930,25 @@ try {
               $comparacion_monto
             ]);
 
-            if ($insert->rowCount() > 0) {
-              $insertados++;
+            if ($import_existente) {
+              $actualizados++;
             } else {
-              $omitidos++;
+              $insertados++;
             }
           }
 
           $pdo->commit();
           $guardado = true;
-          $mensaje = 'Importacion de gastos completada. Lote #' . $lote_id . '. Nuevos registros: ' . $insertados . '. Omitidos por duplicado: ' . $omitidos . '.';
-          registrar_actividad($pdo, 'Importar gastos', $nombre_archivo_lote . ' | Lote: ' . $lote_id . ' | Nuevos: ' . $insertados . ' | Duplicados: ' . $omitidos);
+          if ($insertados > 0 || $actualizados > 0) {
+            $lote_recien_guardado_id = $lote_id;
+          }
+          $mensaje = 'Importacion de gastos completada. Lote #' . $lote_id . '. Nuevos registros: ' . $insertados . '. Registros actualizados: ' . $actualizados . '.';
+          if ($insertados === 0 && $actualizados > 0) {
+            $aviso = 'La carga se guardo como lote #' . $lote_id . '. No hubo registros nuevos, pero los movimientos existentes se actualizaron y quedaron asociados a este lote.';
+          } elseif ($insertados === 0) {
+            $aviso = 'La carga se guardo como lote #' . $lote_id . ', pero no genero registros nuevos para revision.';
+          }
+          registrar_actividad($pdo, 'Importar gastos', $nombre_archivo_lote . ' | Lote: ' . $lote_id . ' | Nuevos: ' . $insertados . ' | Actualizados: ' . $actualizados);
         } else {
           $preview = array_slice($data_rows, 0, 15);
         }
@@ -957,15 +1149,19 @@ try {
   }
   }
 
-  $filtro_estado = trim($_GET['estado'] ?? '');
-  $filtro_archivo = trim($_GET['archivo'] ?? '');
-$filtro_lote = (int)($_GET['lote_id'] ?? 0);
-$filtro_proyecto = (int)($_GET['proyecto_id'] ?? 0);
-$solo_no_pasados = isset($_GET['solo_no_pasados']);
-$solo_oc_existente = isset($_GET['solo_oc_existente']);
-$solo_monto_distinto = isset($_GET['solo_monto_distinto']);
-$solo_conflicto_proyecto = isset($_GET['solo_conflicto_proyecto']);
-$busqueda = trim($_GET['q'] ?? '');
+  $filtro_estado = trim((string)($_GET['estado'] ?? $_POST['filtro_estado'] ?? ''));
+  $filtro_archivo = trim((string)($_GET['archivo'] ?? $_POST['filtro_archivo'] ?? ''));
+  $filtro_lote = (int)($_GET['lote_id'] ?? $_POST['filtro_lote_id'] ?? 0);
+  $filtro_proyecto = (int)($_GET['proyecto_id'] ?? $_POST['filtro_proyecto_id'] ?? 0);
+  $solo_no_pasados = isset($_GET['solo_no_pasados']) || isset($_POST['filtro_solo_no_pasados']);
+  $solo_oc_existente = isset($_GET['solo_oc_existente']) || isset($_POST['filtro_solo_oc_existente']);
+  $solo_monto_distinto = isset($_GET['solo_monto_distinto']) || isset($_POST['filtro_solo_monto_distinto']);
+  $solo_conflicto_proyecto = isset($_GET['solo_conflicto_proyecto']) || isset($_POST['filtro_solo_conflicto_proyecto']);
+  $busqueda = trim((string)($_GET['q'] ?? $_POST['filtro_q'] ?? ''));
+
+  if ($filtro_lote <= 0 && $lote_recien_guardado_id > 0) {
+    $filtro_lote = $lote_recien_guardado_id;
+  }
 
   $sql = 'SELECT ig.*, p.codigo AS proyecto_codigo, p.nombre AS proyecto_nombre,
                  l.archivo_original AS lote_archivo, l.creado_en AS lote_creado_en
@@ -1003,14 +1199,14 @@ $busqueda = trim($_GET['q'] ?? '');
     $sql .= ' AND ig.orden_existente_id IS NOT NULL';
   }
 
-if ($solo_monto_distinto) {
-  $sql .= ' AND ig.comparacion_monto = ?';
-  $params[] = 'distinto';
-}
+  if ($solo_monto_distinto) {
+    $sql .= ' AND ig.comparacion_monto = ?';
+    $params[] = 'distinto';
+  }
 
-if ($solo_conflicto_proyecto) {
-  $sql .= ' AND ig.conflicto_proyecto = 1';
-}
+  if ($solo_conflicto_proyecto) {
+    $sql .= ' AND ig.conflicto_proyecto = 1';
+  }
 
   if ($busqueda !== '') {
     $like = '%' . $busqueda . '%';
@@ -1027,8 +1223,21 @@ if ($solo_conflicto_proyecto) {
   $registros = $stmt->fetchAll();
 
   $archivos = $pdo->query('SELECT DISTINCT origen_archivo FROM ceo_import_gastos ORDER BY origen_archivo DESC')->fetchAll();
-  $lotes = $pdo->query('SELECT id, archivo_original, creado_en FROM ceo_import_gastos_lotes ORDER BY id DESC')->fetchAll();
-$estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente', 'pasado'];
+  $lotes = $pdo->query(
+    'SELECT l.id, l.archivo_original, l.creado_en, COUNT(ig.id) AS total_registros
+     FROM ceo_import_gastos_lotes l
+     LEFT JOIN ceo_import_gastos ig ON ig.lote_id = l.id
+     GROUP BY l.id, l.archivo_original, l.creado_en
+     ORDER BY l.id DESC'
+  )->fetchAll();
+  $lote_activo = null;
+  foreach ($lotes as $lote) {
+    if ((int)$lote['id'] === $filtro_lote) {
+      $lote_activo = $lote;
+      break;
+    }
+  }
+  $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente', 'pasado'];
 } catch (Throwable $e) {
   $fatal_error = true;
   $errores[] = 'No fue posible cargar Importar Gastos: ' . $e->getMessage();
@@ -1038,6 +1247,7 @@ $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente',
   $registros = [];
   $archivos = [];
   $lotes = [];
+  $lote_activo = null;
   $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente', 'pasado'];
   $filtro_estado = '';
   $filtro_archivo = '';
@@ -1072,6 +1282,19 @@ $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente',
         <li><?= htmlspecialchars($err) ?></li>
       <?php endforeach; ?>
     </ul>
+  </div>
+<?php endif; ?>
+
+<?php if ($aviso !== ''): ?>
+  <div class="alert alert-warning"><?= htmlspecialchars($aviso) ?></div>
+<?php endif; ?>
+
+<?php if ($lote_activo !== null): ?>
+  <div class="alert alert-info">
+    Mostrando lote #<?= (int)$lote_activo['id'] ?>
+    (<?= htmlspecialchars($lote_activo['archivo_original']) ?>)
+    cargado el <?= htmlspecialchars(date('d-m-Y H:i', strtotime((string)$lote_activo['creado_en']))) ?>.
+    Registros en revision: <?= (int)($lote_activo['total_registros'] ?? 0) ?>.
   </div>
 <?php endif; ?>
 
@@ -1151,7 +1374,7 @@ $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente',
       <select class="form-select" name="lote_id">
         <option value="0">Todos</option>
         <?php foreach ($lotes as $lote): ?>
-          <option value="<?= (int)$lote['id'] ?>" <?= $filtro_lote === (int)$lote['id'] ? 'selected' : '' ?>>#<?= (int)$lote['id'] ?> | <?= htmlspecialchars($lote['archivo_original']) ?></option>
+          <option value="<?= (int)$lote['id'] ?>" <?= $filtro_lote === (int)$lote['id'] ? 'selected' : '' ?>>#<?= (int)$lote['id'] ?> | <?= htmlspecialchars($lote['archivo_original']) ?> | <?= (int)($lote['total_registros'] ?? 0) ?> reg.</option>
         <?php endforeach; ?>
       </select>
     </div>
@@ -1195,11 +1418,31 @@ $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente',
     <div class="col-md-3 d-flex align-items-end">
       <button type="submit" class="btn btn-primary w-100">Filtrar</button>
     </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <a href="/ceofinanzas/public/import_gastos.php" class="btn btn-outline-secondary w-100">Limpiar filtros</a>
+    </div>
   </form>
 </div>
 
 <div class="card p-4">
   <form method="post">
+    <input type="hidden" name="filtro_estado" value="<?= htmlspecialchars($filtro_estado) ?>">
+    <input type="hidden" name="filtro_archivo" value="<?= htmlspecialchars($filtro_archivo) ?>">
+    <input type="hidden" name="filtro_lote_id" value="<?= (int)$filtro_lote ?>">
+    <input type="hidden" name="filtro_proyecto_id" value="<?= (int)$filtro_proyecto ?>">
+    <input type="hidden" name="filtro_q" value="<?= htmlspecialchars($busqueda) ?>">
+    <?php if ($solo_no_pasados): ?>
+      <input type="hidden" name="filtro_solo_no_pasados" value="1">
+    <?php endif; ?>
+    <?php if ($solo_oc_existente): ?>
+      <input type="hidden" name="filtro_solo_oc_existente" value="1">
+    <?php endif; ?>
+    <?php if ($solo_monto_distinto): ?>
+      <input type="hidden" name="filtro_solo_monto_distinto" value="1">
+    <?php endif; ?>
+    <?php if ($solo_conflicto_proyecto): ?>
+      <input type="hidden" name="filtro_solo_conflicto_proyecto" value="1">
+    <?php endif; ?>
     <div class="row g-3 mb-3">
       <div class="col-md-6">
         <label class="form-label">Asignar proyecto a seleccionados</label>
@@ -1246,11 +1489,17 @@ $estados_revision = ['listo', 'sin_proyecto', 'conflicto_proyecto', 'pendiente',
           </tr>
         </thead>
         <tbody>
-          <?php if (empty($registros)): ?>
-            <tr>
-              <td colspan="23" class="text-center text-secondary">Sin registros para la revision.</td>
-            </tr>
-          <?php else: ?>
+        <?php if (empty($registros)): ?>
+          <tr>
+            <td colspan="23" class="text-center text-secondary">
+              <?php if ($lote_activo !== null && (int)($lote_activo['total_registros'] ?? 0) === 0): ?>
+                Este lote no tiene registros para revision.
+              <?php else: ?>
+                Sin registros para la revision.
+              <?php endif; ?>
+            </td>
+          </tr>
+        <?php else: ?>
             <?php foreach ($registros as $registro): ?>
               <?php
                 $puede_seleccionar = empty($registro['pasado_a_orden_id']);
